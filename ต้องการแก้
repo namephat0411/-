@@ -109,8 +109,9 @@ def get_random_in_range(r_min, r_max, allow_decimals, dec_places="สุ่ม")
 
         else:
 
-            if random.random() < 0.5: val += random.randint(1, 99) / 100; (val += 0.01 if val % 1 == 0 else val)
-
+            if random.random() < 0.5:
+                val += random.randint(1, 99) / 100
+                if val % 1 == 0: val += 0.01
             return round(val, 3)
 
     return round(val, 3)
@@ -1003,6 +1004,56 @@ def schedule_data(*args):
     data_timer = root.after(delay, generate_preview_data)
 
 
+def refresh_numbers_realtime():
+    """สุ่มชุดโจทย์ใหม่แล้วรีเฟรชพรีวิวทันที"""
+    generate_preview_data()
+
+
+def is_page_visible(group_vars, page_idx):
+    """ตรวจว่า page (0-based) นี้ควรแสดงภาพของกลุ่มหรือไม่"""
+    mode = group_vars.var_vis_mode.get()
+    page_no = page_idx + 1
+
+    if mode == "All":
+        return True
+
+    if mode == "EveryN":
+        try:
+            n = int(group_vars.var_vis_n.get())
+            return n > 0 and (page_no % n == 0)
+        except Exception:
+            return False
+
+    if mode == "Custom":
+        text = str(group_vars.var_vis_custom.get()).strip()
+        if not text:
+            return False
+
+        selected_pages = set()
+        for part in text.split(','):
+            token = part.strip()
+            if not token:
+                continue
+            if '-' in token:
+                try:
+                    a_str, b_str = token.split('-', 1)
+                    a, b = int(a_str), int(b_str)
+                except Exception:
+                    continue
+                lo, hi = sorted((a, b))
+                for p_no in range(max(1, lo), hi + 1):
+                    selected_pages.add(p_no)
+            else:
+                try:
+                    selected_pages.add(int(token))
+                except Exception:
+                    continue
+
+        return page_no in selected_pages
+
+    return True
+
+
 def get_paper_dimensions_pt():
     size = var_paper_size.get()
 
@@ -1166,14 +1217,14 @@ Label(preview_header, text="PREVIEW:", fg="white", bg="#333", font=("Helvetica",
                                                                                                    padx=(10, 5), pady=5)
 
 Scale(preview_header, from_=0.3, to=1.5, resolution=0.1, variable=var_scale, orient=HORIZONTAL, bg="#333", fg="white",
-      highlightthickness=0, length=100, label="Zoom").pack(side=LEFT, padx=5)
+      highlightthickness=0, length=100, label="Zoom", command=schedule_preview).pack(side=LEFT, padx=5)
 
 # ปุ่มเปิดปิด Real-time เพิ่มตรงขวาบน
 
 Checkbutton(preview_header, text="⚡ Real-time", variable=var_realtime_preview, bg="#333", fg="yellow",
             selectcolor="#555", font=("Helvetica", 9, "bold")).pack(side=RIGHT, padx=10)
 
-Button(preview_header, text="Refresh Numbers", bg="#555", fg="white", command=schedule_data).pack(side=RIGHT, padx=5,
+Button(preview_header, text="Refresh Numbers", bg="#555", fg="white", command=refresh_numbers_realtime).pack(side=RIGHT, padx=5,
                                                                                                   pady=5)
 
 Checkbutton(preview_header, text="Show Answer", variable=var_show_ans_preview, bg="#333", fg="white",
@@ -1647,10 +1698,28 @@ def draw_preview_canvas(*args):
 
                     cfg = configs[page_idx]
 
-                    target_path = cfg["path"];
-                    rot = cfg["rot"];
-                    flip = cfg["flip"];
+                    target_path = cfg["path"]
+                    rot = cfg["rot"]
+                    flip = cfg["flip"]
                     scale = cfg["scale"]
+
+                    # ค่าที่ตั้งแบบ Fixed/All/None ควรสะท้อนใน Preview ทันที
+                    if g.var_scale_mode.get() == "Fixed":
+                        try:
+                            scale = g.var_scale_fixed.get() / 100.0
+                        except:
+                            scale = cfg.get("scale", 1.0)
+
+                    if g.var_rot_mode.get() == "Fixed":
+                        try:
+                            rot = g.var_rot_fixed.get()
+                        except:
+                            rot = cfg.get("rot", 0)
+
+                    if g.var_flip_mode.get() == "All":
+                        flip = True
+                    elif g.var_flip_mode.get() == "None":
+                        flip = False
 
                 if os.path.exists(target_path):
 

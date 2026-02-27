@@ -25,6 +25,7 @@ from reportlab.lib.pagesizes import A4
 # ==========================================
 def global_exception_handler(exc_type, exc_value, exc_traceback):
     err_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+
     try:
         root = Tk();
         root.withdraw()
