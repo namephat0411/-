@@ -1215,14 +1215,14 @@ Label(preview_header, text="PREVIEW:", fg="white", bg="#333", font=("Helvetica",
                                                                                                    padx=(10, 5), pady=5)
 
 Scale(preview_header, from_=0.3, to=1.5, resolution=0.1, variable=var_scale, orient=HORIZONTAL, bg="#333", fg="white",
-      highlightthickness=0, length=100, label="Zoom").pack(side=LEFT, padx=5)
+      highlightthickness=0, length=100, label="Zoom", command=schedule_preview).pack(side=LEFT, padx=5)
 
 # ปุ่มเปิดปิด Real-time เพิ่มตรงขวาบน
 
 Checkbutton(preview_header, text="⚡ Real-time", variable=var_realtime_preview, bg="#333", fg="yellow",
             selectcolor="#555", font=("Helvetica", 9, "bold")).pack(side=RIGHT, padx=10)
 
-Button(preview_header, text="Refresh Numbers", bg="#555", fg="white", command=schedule_data).pack(side=RIGHT, padx=5,
+Button(preview_header, text="Refresh Numbers", bg="#555", fg="white", command=refresh_numbers_realtime).pack(side=RIGHT, padx=5,
                                                                                                   pady=5)
 
 Checkbutton(preview_header, text="Show Answer", variable=var_show_ans_preview, bg="#333", fg="white",
@@ -1696,10 +1696,28 @@ def draw_preview_canvas(*args):
 
                     cfg = configs[page_idx]
 
-                    target_path = cfg["path"];
-                    rot = cfg["rot"];
-                    flip = cfg["flip"];
+                    target_path = cfg["path"]
+                    rot = cfg["rot"]
+                    flip = cfg["flip"]
                     scale = cfg["scale"]
+
+                    # ค่าที่ตั้งแบบ Fixed/All/None ควรสะท้อนใน Preview ทันที
+                    if g.var_scale_mode.get() == "Fixed":
+                        try:
+                            scale = g.var_scale_fixed.get() / 100.0
+                        except:
+                            scale = cfg.get("scale", 1.0)
+
+                    if g.var_rot_mode.get() == "Fixed":
+                        try:
+                            rot = g.var_rot_fixed.get()
+                        except:
+                            rot = cfg.get("rot", 0)
+
+                    if g.var_flip_mode.get() == "All":
+                        flip = True
+                    elif g.var_flip_mode.get() == "None":
+                        flip = False
 
                 if os.path.exists(target_path):
 
@@ -2434,7 +2452,7 @@ def apply_state(state):
         toggle_custom_paper()
 
         var_wm_enable.set(state.get("wm_enable", False));
-        var_wm_text.set(state.get("wm_text", "(แบบฝึกโดย พัฒน์)"))
+        var_wm_text.set(state.get("wm_text", "(Math Worksheet By Phat)"))
 
         var_wm_x.set(state.get("wm_x", 400));
         var_wm_y.set(state.get("wm_y", 30))
