@@ -1,0 +1,3925 @@
+import os
+
+import random
+
+import time
+
+import datetime
+
+import platform
+
+import math
+
+import subprocess
+
+import glob
+
+import winreg
+
+import json
+
+import traceback
+
+import sys
+
+from tkinter import *
+
+from tkinter import filedialog, messagebox, colorchooser, ttk
+
+import tkinter.font as tkfont
+
+from reportlab.pdfgen import canvas
+
+from reportlab.lib import colors
+
+from reportlab.pdfbase import pdfmetrics
+
+from reportlab.pdfbase.ttfonts import TTFont
+
+from reportlab.lib.pagesizes import A4
+
+
+# ==========================================
+
+# Crash Reporter
+
+# ==========================================
+
+def global_exception_handler(exc_type, exc_value, exc_traceback):
+    err_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+
+    if "expected floating-point number but got" in str(exc_value) or "expected integer but got" in str(
+        exc_value): return
+
+    try:
+
+        root = Tk();
+        root.withdraw();
+        messagebox.showerror("Crash Report", f"พบบั๊กในโค้ด:\n\n{err_msg}")
+
+    except:
+        print(err_msg)
+
+
+sys.excepthook = global_exception_handler
+
+try:
+    from PIL import Image, ImageTk; has_pillow = True
+
+except ImportError:
+    has_pillow = False
+
+try:
+    import fitz; has_pymupdf = True
+
+except ImportError:
+    has_pymupdf = False
+
+
+def _hide_console():
+    if platform.system() == "Windows":
+
+        try:
+            import ctypes; hWnd = ctypes.windll.kernel32.GetConsoleWindow(); (
+                ctypes.windll.user32.ShowWindow(hWnd, 0) if hWnd else None)
+
+        except Exception:
+            pass
+
+
+_hide_console()
+
+
+def get_thai_datetime_string(): return datetime.datetime.now().strftime(f"%d%m{datetime.datetime.now().year + 543}%H%M")
+
+
+def get_random_in_range(r_min, r_max, allow_decimals, dec_places="สุ่ม"):
+    val = random.randint(int(min(r_min, r_max)), int(max(r_min, r_max)))
+
+    if allow_decimals:
+
+        if dec_places == "1 ตำแหน่ง":
+            return round(val + random.randint(1, 9) / 10, 1)
+
+        elif dec_places == "2 ตำแหน่ง":
+            return round(val + random.randint(1, 99) / 100, 2)
+
+        elif dec_places == "3 ตำแหน่ง":
+            return round(val + random.randint(1, 999) / 1000, 3)
+
+        else:
+
+            if random.random() < 0.5:
+                val += random.randint(1, 99) / 100
+                if val % 1 == 0: val += 0.01
+
+    return round(val, 3)
+
+
+def generate_single_expression(num_operands, ops, ranges, allow_negative, allow_decimals, dec_places, use_parentheses):
+    if not ops: return None, None
+
+    for _ in range(30):
+
+        numbers = [get_random_in_range(ranges[i][0], ranges[i][1], allow_decimals, dec_places) if i < len(
+            ranges) else get_random_in_range(1, 10, allow_decimals, dec_places) for i in range(num_operands)]
+
+        op_list = [random.choice(ops) for _ in range(num_operands - 1)]
+
+        valid_div = True
+
+        for i, op in enumerate(op_list):
+
+            if op == "/":
+
+                if abs(numbers[i + 1]) < 1e-3: valid_div = False; break
+
+                if not allow_decimals:
+
+                    if numbers[i + 1] == 0: numbers[i + 1] = 1
+
+                    if numbers[i] % numbers[i + 1] != 0: valid_div = False; break
+
+        if not valid_div: continue
+
+        parts = [str(n) for n in numbers]
+
+        for i in range(num_operands - 1): parts.insert(i * 2 + 1, {"*": "x", "/": "÷"}.get(op_list[i], op_list[i]))
+
+        if num_operands > 2 and use_parentheses and random.random() < 0.7:
+
+            if random.random() < 0.5:
+                parts[0] = "(" + parts[0]; parts[2] = parts[2] + ")"
+
+            else:
+                parts[2] = "(" + parts[2]; parts[4] = parts[4] + ")"
+
+        final_expr = " ".join(parts)
+
+        try:
+
+            result = round(eval(final_expr.replace("x", "*").replace("÷", "/").replace(" ", "")), 3)
+
+            if result == int(result): result = int(result)
+
+        except:
+            continue
+
+        if not allow_negative and result < 0: continue
+
+        return final_expr, result
+
+    return None, None
+
+
+def generate_questions(count, ops, ranges, mode, allow_negative, allow_decimals, dec_places, use_parentheses,
+                       num_operands, unique_flag):
+    questions = [];
+    answers = [];
+    seen = set();
+    attempts = 0
+
+    while len(questions) < count and attempts < (count * 50):
+
+        attempts += 1
+
+        if mode == "hard_compare":
+
+            expr1, ans1 = generate_single_expression(num_operands, ops, ranges, allow_negative, allow_decimals,
+                                                     dec_places, use_parentheses)
+
+            expr2, ans2 = generate_single_expression(num_operands, ops, ranges, allow_negative, allow_decimals,
+                                                     dec_places, use_parentheses)
+
+            if not expr1 or not expr2: continue
+
+            if random.random() < 0.2: ans2 = ans1
+
+            rel = "=" if abs(ans1 - ans2) < 1e-6 else ("<" if ans1 < ans2 else ">")
+
+            raw_q = f"{expr1}={ans1}□{expr2}={ans2}"
+
+            if unique_flag and raw_q in seen: continue
+
+            seen.add(raw_q);
+            questions.append(f"{expr1}|{expr2}");
+            answers.append(f"{ans1}|{rel}|{ans2}")
+
+        elif mode == "compare":
+
+            r1 = ranges[0] if len(ranges) > 0 else (1, 10);
+            r2 = ranges[1] if len(ranges) > 1 else (1, 10)
+
+            n1 = get_random_in_range(r1[0], r1[1], allow_decimals, dec_places);
+            n2 = get_random_in_range(r2[0], r2[1], allow_decimals, dec_places)
+
+            rel = "=" if abs(n1 - n2) < 1e-6 else ("<" if n1 < n2 else ">")
+
+            raw_q = f"{n1}□{n2}"
+
+            if unique_flag and raw_q in seen: continue
+
+            seen.add(raw_q);
+            questions.append(f"{n1} □ {n2}");
+            answers.append(rel)
+
+        else:
+
+            expr, ans = generate_single_expression(num_operands, ops, ranges, allow_negative, allow_decimals,
+                                                   dec_places, use_parentheses)
+
+            if not expr: continue
+
+            if unique_flag and expr in seen: continue
+
+            seen.add(expr)
+
+            if mode == "fill":
+
+                pts = expr.split(" ");
+                num_idx = [i for i, p in enumerate(pts) if p not in ["+", "-", "x", "÷", "(", ")"]]
+
+                if not num_idx: continue
+
+                idx = random.choice(num_idx);
+                hidden = pts[idx];
+                pts[idx] = "□"
+
+                questions.append(" ".join(pts) + f" = {ans}");
+                answers.append(hidden)
+
+            else:
+                questions.append(f"{expr} ="); answers.append(str(ans))
+
+    return questions, answers
+
+
+def get_unique_filename(filepath):
+    if not os.path.exists(filepath): return filepath
+
+    base, ext = os.path.splitext(filepath);
+    c = 1
+
+    while True:
+
+        new_path = f"{base}({c}){ext}"
+
+        if not os.path.exists(new_path): return new_path
+
+        c += 1
+
+
+def hex_to_rgb(hex_color): return tuple(int(hex_color.lstrip('#')[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+
+def load_windows_fonts():
+    f_map = {};
+    f_names = []
+
+    if platform.system() == "Windows":
+
+        keys_to_check = [(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"),
+                         (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows NT\CurrentVersion\Fonts")]
+
+        for hkey, subkey in keys_to_check:
+
+            try:
+
+                with winreg.OpenKey(hkey, subkey) as key:
+
+                    for i in range(winreg.QueryInfoKey(key)[1]):
+
+                        name, value, _ = winreg.EnumValue(key, i)
+
+                        clean_name = name.replace(" (TrueType)", "").replace(" (OpenType)", "").strip()
+
+                        f_path = value if os.path.isabs(value) else os.path.join(
+                            os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts', value)
+
+                        if f_path.lower().endswith(".ttf") and os.path.exists(f_path) and clean_name not in f_map:
+                            f_map[clean_name] = f_path;
+                            f_names.append(clean_name)
+
+            except:
+                pass
+
+        for d in [os.path.join(os.environ.get('WINDIR', 'C:\\Windows'), 'Fonts'),
+                  os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~\\AppData\\Local')),
+                               'Microsoft\\Windows\\Fonts')]:
+
+            if os.path.exists(d):
+
+                for f_path in glob.glob(os.path.join(d, "*.ttf")):
+
+                    clean_name = os.path.splitext(os.path.basename(f_path))[0]
+
+                    if clean_name not in f_map: f_map[clean_name] = f_path; f_names.append(clean_name)
+
+    f_names.sort();
+    f_names.insert(0, "Default (Helvetica)")
+
+    return f_map, f_names
+
+
+system_font_map, system_font_names = load_windows_fonts()
+
+
+# ==========================================
+
+# ส่วน PDF Generator (แก้บั๊กรูปหน้าเว้นหน้าเรียบร้อย!)
+
+# ==========================================
+
+def draw_worksheet_pdf(c, questions, answers, title, is_answer, mode, is_vertical, num_operands, order_type,
+
+                       show_header, header_text, show_box, q_per_page, total_pages_req, spacing_gap, top_margin_val,
+
+                       side_margin_val, col_gap_val, bg_image_path, custom_num_cols, font_settings, div_format,
+
+                       vertical_gap_val, paper_size, wm_settings, show_qnum, qnum_gap, img_groups=None,
+                       page_assignments=None, pgnum_settings=None):
+    width, height = paper_size;
+    header_margin = 40;
+    start_y = height - top_margin_val;
+    line_height = spacing_gap
+
+    main_rgb = hex_to_rgb(font_settings.get('color', '#000000'));
+    eff_rgb = hex_to_rgb(font_settings.get('effect_color', '#808080'))
+
+    s_main = font_settings.get('size', 14);
+    s_big = s_main * 1.15;
+    s_small = s_main * 0.7;
+    s_header = s_main * 1.3;
+    s_header_sub = s_small * 1.2
+
+    num_cols = max(1, custom_num_cols);
+    col_width = (width - (2 * side_margin_val) - ((num_cols - 1) * col_gap_val)) / num_cols
+
+    def get_pdf_font(f_name, f_bold, f_italic):
+
+        pdf_f = "Helvetica"
+
+        if f_bold and f_italic:
+            pdf_f = "Helvetica-BoldOblique"
+
+        elif f_bold:
+            pdf_f = "Helvetica-Bold"
+
+        elif f_italic:
+            pdf_f = "Helvetica-Oblique"
+
+        if f_name not in ["Default (Helvetica)", "Helvetica"]:
+
+            f_path = system_font_map.get(f_name)
+
+            if f_path and os.path.exists(f_path):
+
+                try:
+                    reg_name = f"Custom-{os.path.basename(f_path)}"; pdfmetrics.registerFont(
+                        TTFont(reg_name, f_path)); return reg_name
+
+                except:
+                    pass
+
+        return pdf_f
+
+    pdf_font_name = get_pdf_font(font_settings.get('family', 'Helvetica'), font_settings.get('bold', False),
+                                 font_settings.get('italic', False))
+
+    def draw_text_with_effect(canvas_obj, x, y, text, font, size, align='left'):
+
+        eff_mod = font_settings.get('effect', 'None');
+        thick = font_settings.get('effect_thickness', 1.0)
+
+        if eff_mod == "Shadow":
+
+            canvas_obj.setFont(font, size);
+            canvas_obj.setFillColorRGB(*eff_rgb);
+            off = (size * 0.05) * thick
+
+            if align == 'right':
+                canvas_obj.drawRightString(x + off, y - off, text)
+
+            elif align == 'center':
+                canvas_obj.drawCentredString(x + off, y - off, text)
+
+            else:
+                canvas_obj.drawString(x + off, y - off, text)
+
+        elif eff_mod == "Outline":
+
+            text_w = canvas_obj.stringWidth(text, font, size);
+            final_x = x - text_w if align == 'right' else (x - (text_w / 2) if align == 'center' else x)
+
+            canvas_obj.setStrokeColorRGB(*eff_rgb);
+            canvas_obj.setFillColorRGB(*main_rgb);
+            canvas_obj.setLineWidth((size * 0.03) * thick)
+
+            t_obj = canvas_obj.beginText(final_x, y);
+            t_obj.setFont(font, size);
+            t_obj.setTextRenderMode(2);
+            t_obj.textOut(text);
+            canvas_obj.drawText(t_obj)
+
+            t_reset = canvas_obj.beginText(0, 0);
+            t_reset.setTextRenderMode(0);
+            canvas_obj.drawText(t_reset)
+
+        elif eff_mod == "Glitch":
+
+            canvas_obj.setFont(font, size);
+            canvas_obj.setFillColorRGB(0, 1, 1);
+            off = (size * 0.04) * thick
+
+            if align == 'right':
+                canvas_obj.drawRightString(x - off, y, text)
+
+            elif align == 'center':
+                canvas_obj.drawCentredString(x - off, y, text)
+
+            else:
+                canvas_obj.drawString(x - off, y, text)
+
+            canvas_obj.setFillColorRGB(1, 0, 1)
+
+            if align == 'right':
+                canvas_obj.drawRightString(x + off, y, text)
+
+            elif align == 'center':
+                canvas_obj.drawCentredString(x + off, y, text)
+
+            else:
+                canvas_obj.drawString(x + off, y, text)
+
+        canvas_obj.setFont(font, size);
+        canvas_obj.setFillColorRGB(*main_rgb)
+
+        if align == 'right':
+            canvas_obj.drawRightString(x, y, text)
+
+        elif align == 'center':
+            canvas_obj.drawCentredString(x, y, text)
+
+        else:
+            canvas_obj.drawString(x, y, text)
+
+    def draw_item(idx, q_str, ans_str, x_pos, y_pos):
+
+        q_start_x = x_pos
+
+        if show_qnum:
+
+            num_txt = f"{idx + 1}.";
+            draw_text_with_effect(c, x_pos, y_pos, num_txt, pdf_font_name, s_main);
+            q_start_x += c.stringWidth(num_txt + " ", pdf_font_name, s_main) + qnum_gap
+
+        else:
+            q_start_x += qnum_gap
+
+        if is_vertical and mode == "normal" and len(str(q_str).split()) <= 4:
+
+            parts = str(q_str).replace("=", "").strip().split()
+
+            if len(parts) == 3:
+
+                n1, op, n2 = parts;
+                align_x = q_start_x + col_width - 30
+
+                if op == '÷' and div_format in ['long', 'short']:
+
+                    w_n1 = c.stringWidth(n1, pdf_font_name, s_big);
+                    w_bracket = c.stringWidth(")", pdf_font_name, s_big);
+                    w_n2 = c.stringWidth(n2, pdf_font_name, s_big)
+
+                    d_x = align_x - w_n1;
+                    b_x = d_x - 5 - w_bracket;
+                    n2_x = b_x - 2 - w_n2
+
+                    draw_text_with_effect(c, n2_x, y_pos, n2, pdf_font_name, s_big, 'left');
+                    draw_text_with_effect(c, b_x, y_pos, ")", pdf_font_name, s_big, 'left');
+                    draw_text_with_effect(c, d_x, y_pos, n1, pdf_font_name, s_big, 'left')
+
+                    c.setStrokeColorRGB(*main_rgb);
+                    c.setLineWidth(1)
+
+                    if div_format == 'long':
+
+                        ly = y_pos + s_big * 0.95;
+                        c.line(b_x, ly, align_x + 5, ly)
+
+                        if is_answer: c.setFillColor(colors.red); c.drawCentredString(d_x + w_n1 / 2, ly + 5,
+                                                                                      str(ans_str)); c.setFillColorRGB(
+                            *main_rgb)
+
+                    else:
+
+                        ly = y_pos - s_big * 0.2;
+                        c.line(b_x, ly, align_x + 5, ly)
+
+                        if is_answer: c.setFillColor(colors.red); c.drawCentredString(d_x + w_n1 / 2, ly - 15,
+                                                                                      str(ans_str)); c.line(b_x + 10,
+                                                                                                            ly - 20,
+                                                                                                            align_x + 5,
+                                                                                                            ly - 20); c.line(
+                            b_x + 10, ly - 22, align_x + 5, ly - 22); c.setFillColorRGB(*main_rgb)
+
+                    return
+
+                line_w = max(c.stringWidth(n1, pdf_font_name, s_big), c.stringWidth(n2, pdf_font_name, s_big)) + 15
+
+                draw_text_with_effect(c, align_x, y_pos, n1, pdf_font_name, s_big, 'right');
+                draw_text_with_effect(c, align_x + 10, y_pos - (vertical_gap_val / 2), op, pdf_font_name, s_big,
+                                      'left');
+                draw_text_with_effect(c, align_x, y_pos - vertical_gap_val, n2, pdf_font_name, s_big, 'right')
+
+                c.setStrokeColorRGB(*main_rgb);
+                c.setLineWidth(1);
+                c.line(align_x - line_w + 5, y_pos - (vertical_gap_val + 5), align_x + 5,
+                       y_pos - (vertical_gap_val + 5))
+
+                if is_answer: c.setFillColor(colors.red); c.drawRightString(align_x, y_pos - (vertical_gap_val + 25),
+                                                                            str(ans_str)); c.setFillColorRGB(*main_rgb)
+
+                return
+
+        if mode == "hard_compare":
+
+            parts = str(q_str).split('|');
+            ans_parts = str(ans_str).split('|')
+
+            if len(parts) == 2:
+
+                ans1 = ans_parts[0] if len(ans_parts) >= 3 else "";
+                rel = ans_parts[1] if len(ans_parts) >= 3 else "";
+                ans2 = ans_parts[2] if len(ans_parts) >= 3 else ""
+
+                str1, str2 = f"{parts[0].strip()} =", f"{parts[1].strip()} ="
+
+                w1, w2 = c.stringWidth(str1, pdf_font_name, s_main), c.stringWidth(str2, pdf_font_name, s_main);
+                box_ans_w, box_rel_w, gap = 40, 30, 8;
+                cur_x = q_start_x
+
+                draw_text_with_effect(c, cur_x, y_pos, str1, pdf_font_name, s_main);
+                cur_x += w1 + gap
+
+                c.setStrokeColorRGB(*main_rgb);
+                c.setLineWidth(1)
+
+                if show_box: c.rect(cur_x, y_pos - 5, box_ans_w, 20)
+
+                if is_answer: c.setFillColor(colors.red); c.drawCentredString(cur_x + box_ans_w / 2, y_pos,
+                                                                              str(ans1)); c.setFillColorRGB(*main_rgb)
+
+                cur_x += box_ans_w + gap
+
+                if show_box: c.rect(cur_x, y_pos - 5, box_rel_w, 20)
+
+                if is_answer: c.setFillColor(colors.red); c.drawCentredString(cur_x + box_rel_w / 2, y_pos,
+                                                                              str(rel)); c.setFillColorRGB(*main_rgb)
+
+                cur_x += box_rel_w + gap
+
+                draw_text_with_effect(c, cur_x, y_pos, str2, pdf_font_name, s_main);
+                cur_x += w2 + gap
+
+                if show_box: c.rect(cur_x, y_pos - 5, box_ans_w, 20)
+
+                if is_answer: c.setFillColor(colors.red); c.drawCentredString(cur_x + box_ans_w / 2, y_pos,
+                                                                              str(ans2)); c.setFillColorRGB(*main_rgb)
+
+            return
+
+        if "□" in str(q_str):
+
+            parts = str(q_str).split("□");
+            txt = parts[0].strip();
+            draw_text_with_effect(c, q_start_x, y_pos, txt, pdf_font_name, s_main);
+            w = c.stringWidth(txt, pdf_font_name, s_main)
+
+            bw = 40 if mode == "compare" else 70;
+            c.setStrokeColorRGB(*main_rgb);
+            c.setLineWidth(1)
+
+            if show_box: c.rect(q_start_x + w + 5, y_pos - 5, bw, 20)
+
+            if len(parts) > 1 and parts[1].strip(): draw_text_with_effect(c, q_start_x + w + bw + 10, y_pos,
+                                                                          parts[1].strip(), pdf_font_name, s_main)
+
+            if is_answer: c.setFillColor(colors.red); c.drawCentredString(q_start_x + w + 5 + bw / 2, y_pos,
+                                                                          str(ans_str)); c.setFillColorRGB(*main_rgb)
+
+        else:
+
+            txt = str(q_str);
+            draw_text_with_effect(c, q_start_x, y_pos, txt, pdf_font_name, s_main);
+            w = c.stringWidth(txt, pdf_font_name, s_main);
+            c.setStrokeColorRGB(*main_rgb);
+            c.setLineWidth(1)
+
+            if show_box: c.rect(q_start_x + w + 10, y_pos - 5, 60, 20)
+
+            if is_answer: c.setFillColor(colors.red); c.drawCentredString(q_start_x + w + 40, y_pos,
+                                                                          str(ans_str)); c.setFillColorRGB(*main_rgb)
+
+    for page_idx in range(total_pages_req):
+
+        if bg_image_path and os.path.exists(bg_image_path):
+
+            try:
+                c.drawImage(bg_image_path, 0, 0, width=width, height=height, mask='auto')
+
+            except:
+                pass
+
+        draw_text_with_effect(c, header_margin, height - 40, title, pdf_font_name, s_header)
+
+        if show_header:
+            c.setFillColorRGB(*main_rgb);
+            draw_text_with_effect(c, header_margin, height - 65, header_text, pdf_font_name, s_header_sub)
+
+        if is_answer:
+            c.setFont("Helvetica-Bold", s_main);
+            c.setFillColor(colors.red);
+            c.drawString(width - header_margin - 100, height - 40, "ANSWER KEY");
+            c.setFillColorRGB(*main_rgb)
+
+        start_idx = page_idx * q_per_page;
+        end_idx = start_idx + q_per_page
+
+        if start_idx < len(questions):
+
+            page_q = questions[start_idx: end_idx];
+            page_a = answers[start_idx: end_idx];
+            base_idx = start_idx
+
+            if num_cols == 1 or order_type == "z_pattern":
+
+                cur_y = start_y;
+                cur_col = 0
+
+                for i, (q, a) in enumerate(zip(page_q, page_a)):
+
+                    x = side_margin_val + (cur_col * (col_width + col_gap_val));
+                    draw_item(base_idx + i, q, a, x, cur_y)
+
+                    cur_col += 1
+
+                    if cur_col >= num_cols: cur_col = 0; cur_y -= line_height
+
+            else:
+
+                split_idx = math.ceil(len(page_q) / num_cols)
+
+                for c_idx in range(num_cols):
+
+                    col_q = page_q[c_idx * split_idx: (c_idx + 1) * split_idx];
+                    col_a = page_a[c_idx * split_idx: (c_idx + 1) * split_idx];
+                    cur_y = start_y;
+                    x = side_margin_val + (c_idx * (col_width + col_gap_val))
+
+                    for r_idx, (q, a) in enumerate(zip(col_q, col_a)):
+
+                        real_idx = base_idx + (c_idx * split_idx) + r_idx
+
+                        if real_idx < len(questions): draw_item(real_idx, q, a, x, cur_y); cur_y -= line_height
+
+        # ==== วาดภาพตกแต่ง (แก้บั๊กแสดงหน้าเว้นหน้าเรียบร้อย) ====
+
+        if img_groups and page_assignments and has_pillow:
+
+            for g_idx in range(3):
+
+                g = img_groups[g_idx]
+
+                # เช็คตรงนี้แหละที่หายไปในเวอร์ชันก่อน!
+
+                v_mode = g.var_vis_mode.get()
+
+                real_page = page_idx + 1
+
+                show_this_page = True
+
+                if v_mode == "EveryN":
+
+                    try:
+                        show_this_page = (real_page % max(1, g.var_vis_n.get())) == 1
+
+                    except:
+                        pass
+
+                elif v_mode == "Custom":
+
+                    try:
+                        show_this_page = real_page in [int(x.strip()) for x in g.var_vis_custom.get().split(",") if
+                                                       x.strip().isdigit()]
+
+                    except:
+                        show_this_page = False
+
+                if not show_this_page:
+                    continue  # ข้ามการวาดรูปในหน้านี้ไปเลย
+
+                configs = page_assignments.get(g_idx, [])
+
+                if page_idx < len(configs):
+
+                    cfg = configs[page_idx]
+
+                    target_path = cfg["path"]
+
+                    if os.path.exists(target_path):
+
+                        try:
+
+                            try:
+                                pos_x = g.var_pos_x.get()
+
+                            except:
+                                pos_x = 100
+
+                            try:
+                                pos_y = g.var_pos_y.get()
+
+                            except:
+                                pos_y = 100
+
+                            scale = cfg["scale"];
+                            rot = cfg["rot"];
+                            flip = cfg["flip"]
+
+                            pil_img = Image.open(target_path)
+
+                            draw_w = pil_img.size[0] * scale;
+                            draw_h = pil_img.size[1] * scale
+
+                            c.saveState()
+
+                            c.translate(pos_x, pos_y);
+                            c.rotate(rot)
+
+                            if flip: c.scale(-1, 1)
+
+                            c.drawImage(target_path, -draw_w / 2, -draw_h / 2, width=draw_w, height=draw_h, mask='auto')
+
+                            c.restoreState()
+
+                        except:
+                            pass
+
+        # ==== วาดลายน้ำ ====
+
+        if wm_settings and wm_settings.get('enable', False) and wm_settings.get('text', ''):
+            c.saveState();
+            wm_color = hex_to_rgb(wm_settings.get('color', '#808080'))
+
+            pdf_wm_f = get_pdf_font(wm_settings.get('font', 'Helvetica'), False, False)
+
+            c.setFont(pdf_wm_f, wm_settings.get('size', 14));
+            c.setFillColorRGB(*wm_color);
+            c.drawString(wm_settings.get('x', 400), wm_settings.get('y', 30), wm_settings.get('text', ''));
+            c.restoreState()
+
+        # ==== วาดหมายเลขหน้า (ใหม่!) ====
+
+        if pgnum_settings and pgnum_settings.get('enable', False):
+
+            c.saveState()
+
+            p_text = pgnum_settings.get('format', 'หน้า {p}').replace("{p}", str(page_idx + 1)).replace("{t}",
+                                                                                                        str(total_pages_req))
+
+            p_color = hex_to_rgb(pgnum_settings.get('color', '#000000'))
+
+            p_font = get_pdf_font(pgnum_settings.get('font', 'Helvetica'), pgnum_settings.get('bold', False),
+                                  pgnum_settings.get('italic', False))
+
+            p_size = pgnum_settings.get('size', 12)
+
+            c.setFont(p_font, p_size);
+            c.setFillColorRGB(*p_color)
+
+            px = pgnum_settings.get('x', 300);
+            py = pgnum_settings.get('y', 30)
+
+            if pgnum_settings.get('align', 'center') == 'center':
+                c.drawCentredString(px, py, p_text)
+
+            elif pgnum_settings.get('align', 'right'):
+                c.drawRightString(px, py, p_text)
+
+            else:
+                c.drawString(px, py, p_text)
+
+            c.restoreState()
+
+        c.showPage()
+
+
+# ==========================================
+
+# GUI Application & Variables
+
+# ==========================================
+
+root = Tk()
+
+root.title("Math Worksheet Generator Pro - Ultimate Edition")
+
+root.geometry("1200x950")
+
+try:
+
+    if os.path.exists("program_icon.ico"):
+        root.iconbitmap("program_icon.ico")
+
+except Exception:
+
+    pass
+
+cached_qs = []
+
+cached_ans = []
+
+bg_image_path = None
+
+preview_img_refs = []
+
+page_image_assignments = {0: [], 1: [], 2: []}
+
+# ================= Variables =================
+
+var_realtime_preview = BooleanVar(value=True)  # ตัวเปิด/ปิด Real-time
+
+var_ops_count = IntVar(value=2)
+
+var_add = BooleanVar(value=True)
+
+var_sub = BooleanVar(value=True)
+
+var_mul = BooleanVar(value=False)
+
+var_div = BooleanVar(value=False)
+
+var_neg = BooleanVar(value=False)
+
+var_dec = BooleanVar(value=False)
+
+var_dec_places = StringVar(value="สุ่ม")
+
+var_par = BooleanVar(value=False)
+
+var_ver = BooleanVar(value=False)
+
+var_unique = BooleanVar(value=False)
+
+var_mode = StringVar(value="normal")
+
+var_order = StringVar(value="z_pattern")
+
+var_div_format = StringVar(value="normal")
+
+var_show_ans_preview = BooleanVar(value=False)
+
+var_show_header = BooleanVar(value=True)
+
+var_show_box = BooleanVar(value=True)
+
+var_paper_size = StringVar(value="A4")
+
+var_orientation = StringVar(value="Portrait")
+
+var_custom_w = StringVar(value="21.0")
+
+var_custom_h = StringVar(value="29.7")
+
+var_custom_unit = StringVar(value="cm")
+
+var_export_img = BooleanVar(value=False)
+
+var_img_format = StringVar(value="png")
+
+var_scale = DoubleVar(value=0.6)
+
+var_spacing = IntVar(value=50)
+
+var_top_margin = IntVar(value=100)
+
+var_side_margin = IntVar(value=40)
+
+var_col_gap = IntVar(value=20)
+
+var_custom_cols = IntVar(value=2)
+
+var_vertical_gap = IntVar(value=20)
+
+var_qnum_gap = IntVar(value=5)
+
+var_show_qnum = BooleanVar(value=True)
+
+var_font_color = StringVar(value="#000000")
+
+var_effect_color = StringVar(value="#000000")
+
+var_font_bold = BooleanVar(value=False)
+
+var_font_italic = BooleanVar(value=False)
+
+var_base_font_size = IntVar(value=16)
+
+var_selected_font_name = StringVar(value=system_font_names[0] if system_font_names else "Helvetica")
+
+var_effect_mode = StringVar(value="None")
+
+var_effect_thickness = DoubleVar(value=1.0)
+
+var_header_text = StringVar(value="Name: ____________________  Class: ______  No: ____  Score: ______")
+
+range_entries = []
+
+var_wm_enable = BooleanVar(value=False)
+
+var_wm_text = StringVar(value="(แบบฝึกโดย พัฒน์)")
+
+var_wm_x = IntVar(value=400)
+
+var_wm_y = IntVar(value=30)
+
+var_wm_size = IntVar(value=14)
+
+var_wm_color = StringVar(value="#808080")
+
+var_wm_font = StringVar(value=system_font_names[0] if system_font_names else "Helvetica")
+
+# --- ตัวแปรสำหรับหมายเลขหน้า (Page Number) ---
+
+var_pgnum_enable = BooleanVar(value=False)
+
+var_pgnum_format = StringVar(value="- {p} -")
+
+var_pgnum_pos = StringVar(value="ล่างกลาง (Bottom Center)")
+
+var_pgnum_x = IntVar(value=300)
+
+var_pgnum_y = IntVar(value=30)
+
+var_pgnum_size = IntVar(value=12)
+
+var_pgnum_color = StringVar(value="#000000")
+
+var_pgnum_font = StringVar(value=system_font_names[0] if system_font_names else "Helvetica")
+
+var_pgnum_bold = BooleanVar(value=False)
+
+var_pgnum_italic = BooleanVar(value=False)
+
+# === ระบบ Debouncing ป้องกันการกระตุก ===
+
+preview_timer = None
+
+data_timer = None
+
+
+def schedule_preview(*args):
+    global preview_timer
+
+    if preview_timer:
+        root.after_cancel(preview_timer)
+
+    # ถ้าติ๊ก Real-time ให้หน่วงแค่ 10ms (อัปเดตทันที) ถ้าไม่ติ๊กให้หน่วง 500ms
+
+    delay = 10 if var_realtime_preview.get() else 500
+
+    preview_timer = root.after(delay, draw_preview_canvas)
+
+
+def schedule_data(*args):
+    global data_timer
+
+    if data_timer:
+        root.after_cancel(data_timer)
+
+    delay = 10 if var_realtime_preview.get() else 500
+
+    data_timer = root.after(delay, generate_preview_data)
+def refresh_numbers_realtime():
+    """สุ่มชุดโจทย์ใหม่แล้วรีเฟรชพรีวิวทันที"""
+    generate_preview_data()
+
+
+def is_page_visible(group_vars, page_idx):
+    """ตรวจว่า page (0-based) นี้ควรแสดงภาพของกลุ่มหรือไม่"""
+    mode = group_vars.var_vis_mode.get()
+    page_no = page_idx + 1
+
+    if mode == "All":
+        return True
+
+    if mode == "EveryN":
+        try:
+            n = int(group_vars.var_vis_n.get())
+            return n > 0 and (page_no % n == 0)
+        except Exception:
+            return False
+
+    if mode == "Custom":
+        text = str(group_vars.var_vis_custom.get()).strip()
+        if not text:
+            return False
+
+        selected_pages = set()
+        for part in text.split(','):
+            token = part.strip()
+            if not token:
+                continue
+            if '-' in token:
+                try:
+                    a_str, b_str = token.split('-', 1)
+                    a, b = int(a_str), int(b_str)
+                except Exception:
+                    continue
+                lo, hi = sorted((a, b))
+                for p_no in range(max(1, lo), hi + 1):
+                    selected_pages.add(p_no)
+            else:
+                try:
+                    selected_pages.add(int(token))
+                except Exception:
+                    continue
+
+        return page_no in selected_pages
+
+    return True
+
+
+
+def get_paper_dimensions_pt():
+    size = var_paper_size.get()
+
+    ori = var_orientation.get()
+
+    if size == "A4":
+
+        w, h = 595.27, 841.89
+
+    elif size == "A3":
+
+        w, h = 841.89, 1190.55
+
+    elif size == "A5":
+
+        w, h = 419.53, 595.27
+
+    elif size == "Letter":
+
+        w, h = 612.0, 792.0
+
+    elif size == "Legal":
+
+        w, h = 612.0, 1008.0
+
+    elif size == "Custom":
+
+        try:
+
+            cw = float(var_custom_w.get())
+
+            ch = float(var_custom_h.get())
+
+            unit = var_custom_unit.get()
+
+            if unit == "cm":
+
+                w, h = cw * 28.3464567, ch * 28.3464567
+
+            elif unit == "mm":
+
+                w, h = cw * 2.83464567, ch * 2.83464567
+
+            elif unit == "inch":
+
+                w, h = cw * 72.0, ch * 72.0
+
+            else:
+
+                w, h = cw, ch
+
+        except:
+
+            w, h = 595.27, 841.89
+
+    else:
+
+        w, h = 595.27, 841.89
+
+    return (max(w, h), min(w, h)) if ori == "Landscape" else (min(w, h), max(w, h))
+
+
+class ImageGroupVars:
+
+    def __init__(self, prefix):
+
+        self.prefix = prefix
+
+        self.paths = []
+
+        self.custom_data = {}
+
+        self.var_preview_mode = StringVar(value="Actual")
+
+        self.var_pos_x = IntVar(value=100)
+
+        self.var_pos_y = IntVar(value=100)
+
+        self.var_scale_mode = StringVar(value="Fixed")
+
+        self.var_scale_fixed = IntVar(value=100)
+
+        self.var_scale_min = IntVar(value=50)
+
+        self.var_scale_max = IntVar(value=150)
+
+        self.var_rot_mode = StringVar(value="Fixed")
+
+        self.var_rot_fixed = IntVar(value=0)
+
+        self.var_rot_min = IntVar(value=-45)
+
+        self.var_rot_max = IntVar(value=45)
+
+        self.var_display_mode = StringVar(value="Sequence")
+
+        self.var_unique = BooleanVar(value=False)
+
+        self.var_flip_mode = StringVar(value="None")
+
+        self.var_vis_mode = StringVar(value="All")
+
+        self.var_vis_n = IntVar(value=2)
+
+        self.var_vis_custom = StringVar(value="1,3,5")
+
+        self.lbl_info = None
+
+        self.cb_preview = None
+
+        self.btn_custom = None
+
+    def toggle_custom_btn(self, *args):
+
+        if self.btn_custom:
+
+            if self.var_rot_mode.get() == "Custom" or self.var_flip_mode.get() == "Custom":
+
+                self.btn_custom.config(state="normal")
+
+            else:
+
+                self.btn_custom.config(state="disabled")
+
+
+image_groups = [ImageGroupVars(f"g{i}") for i in range(3)]
+
+main_pane = PanedWindow(root, orient=HORIZONTAL, sashrelief=RAISED, sashwidth=5)
+
+main_pane.pack(fill=BOTH, expand=True)
+
+left_frame_container = Frame(main_pane)
+
+main_pane.add(left_frame_container, minsize=400, width=470)
+
+left_canvas = Canvas(left_frame_container)
+
+left_scrollbar = ttk.Scrollbar(left_frame_container, orient=VERTICAL, command=left_canvas.yview)
+
+left_content = Frame(left_canvas, padx=10, pady=10)
+
+left_content.bind("<Configure>", lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+
+left_canvas.create_window((0, 0), window=left_content, anchor="nw")
+
+left_canvas.configure(yscrollcommand=left_scrollbar.set)
+
+left_canvas.pack(side=LEFT, fill=BOTH, expand=True)
+
+left_scrollbar.pack(side=RIGHT, fill=Y)
+
+right_frame_container = Frame(main_pane, bg="#404040")
+
+main_pane.add(right_frame_container, minsize=400)
+
+preview_header = Frame(right_frame_container, bg="#333", height=40)
+
+preview_header.pack(fill=X)
+
+Label(preview_header, text="PREVIEW:", fg="white", bg="#333", font=("Helvetica", 10, "bold")).pack(side=LEFT,
+                                                                                                   padx=(10, 5), pady=5)
+
+Scale(preview_header, from_=0.3, to=1.5, resolution=0.1, variable=var_scale, orient=HORIZONTAL, bg="#333", fg="white",
+      highlightthickness=0, length=100, label="Zoom").pack(side=LEFT, padx=5)
+
+# ปุ่มเปิดปิด Real-time เพิ่มตรงขวาบน
+
+Checkbutton(preview_header, text="⚡ Real-time", variable=var_realtime_preview, bg="#333", fg="yellow",
+            selectcolor="#555", font=("Helvetica", 9, "bold")).pack(side=RIGHT, padx=10)
+
+Button(preview_header, text="Refresh Numbers", bg="#555", fg="white", command=schedule_data).pack(side=RIGHT, padx=5,
+                                                                                                  pady=5)
+
+Checkbutton(preview_header, text="Show Answer", variable=var_show_ans_preview, bg="#333", fg="white",
+            selectcolor="#555", command=schedule_preview).pack(side=RIGHT, padx=5)
+
+preview_canvas = Canvas(right_frame_container, bg="#505050")
+
+preview_scrollbar_y = ttk.Scrollbar(right_frame_container, orient=VERTICAL, command=preview_canvas.yview)
+
+preview_scrollbar_x = ttk.Scrollbar(right_frame_container, orient=HORIZONTAL, command=preview_canvas.xview)
+
+preview_canvas.configure(yscrollcommand=preview_scrollbar_y.set, xscrollcommand=preview_scrollbar_x.set)
+
+preview_scrollbar_y.pack(side=RIGHT, fill=Y)
+
+preview_scrollbar_x.pack(side=BOTTOM, fill=X)
+
+preview_canvas.pack(side=LEFT, fill=BOTH, expand=True)
+
+
+def bind_mousewheel(widget_container, canvas_obj):
+    def _on_mousewheel(event):
+
+        if platform.system() == 'Windows':
+
+            canvas_obj.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        else:
+
+            if event.num == 4:
+
+                canvas_obj.yview_scroll(-1, "units")
+
+            elif event.num == 5:
+
+                canvas_obj.yview_scroll(1, "units")
+
+    def _bind(e):
+
+        widget_container.bind_all('<MouseWheel>', _on_mousewheel)
+
+        widget_container.bind_all('<Button-4>', _on_mousewheel)
+
+        widget_container.bind_all('<Button-5>', _on_mousewheel)
+
+    def _unbind(e):
+
+        widget_container.unbind_all('<MouseWheel>')
+
+        widget_container.unbind_all('<Button-4>')
+
+        widget_container.unbind_all('<Button-5>')
+
+    widget_container.bind('<Enter>', _bind)
+
+    widget_container.bind('<Leave>', _unbind)
+
+
+bind_mousewheel(left_frame_container, left_canvas)
+
+bind_mousewheel(right_frame_container, preview_canvas)
+
+
+# ==========================================
+
+# PREVIEW LOGIC (ระบบคำนวณและวาดพรีวิว)
+
+# ==========================================
+
+def generate_preview_data(*args):
+    global cached_qs, cached_ans, page_image_assignments
+
+    try:
+
+        total_pages = int(entry_total_pages.get())
+
+        total_q = int(entry_q_per_page.get()) * total_pages
+
+        lbl_total_info.config(text=f"รวมทั้งหมด: {total_q} ข้อ")
+
+    except:
+
+        return
+
+    ops = []
+
+    if var_add.get(): ops.append("+")
+
+    if var_sub.get(): ops.append("-")
+
+    if var_mul.get(): ops.append("*")
+
+    if var_div.get(): ops.append("/")
+
+    if not ops and var_mode.get() not in ["compare", "hard_compare"]:
+        return
+
+    ranges = []
+
+    for e_min, e_max in range_entries:
+
+        try:
+
+            ranges.append((float(e_min.get()), float(e_max.get())))
+
+        except:
+
+            return
+
+    cached_qs, cached_ans = generate_questions(
+
+        total_q, ops, ranges, var_mode.get(), var_neg.get(), var_dec.get(),
+
+        var_dec_places.get(), var_par.get(), var_ops_count.get(), var_unique.get()
+
+    )
+
+    # คำนวณการสุ่มภาพตกแต่งล่วงหน้า
+
+    for g_idx, g in enumerate(image_groups):
+
+        assigned = []
+
+        if not g.paths:
+            page_image_assignments[g_idx] = []
+
+            continue
+
+        if g.var_unique.get():
+
+            pool = list(g.paths)
+
+            random.shuffle(pool)
+
+            for p in range(total_pages):
+
+                if not pool:
+                    pool = list(g.paths)
+
+                    random.shuffle(pool)
+
+                assigned.append(pool.pop(0))
+
+        else:
+
+            if g.var_display_mode.get() == "Sequence":
+
+                for p in range(total_pages):
+                    assigned.append(g.paths[p % len(g.paths)])
+
+            else:
+
+                for p in range(total_pages):
+                    assigned.append(random.choice(g.paths))
+
+        page_configs = []
+
+        for p in range(total_pages):
+
+            img_path = assigned[p]
+
+            fname = os.path.basename(img_path)
+
+            if g.var_scale_mode.get() == "Fixed":
+
+                try:
+                    scale = g.var_scale_fixed.get() / 100.0
+
+                except:
+                    scale = 1.0
+
+            else:
+
+                try:
+                    scale = random.randint(g.var_scale_min.get(), g.var_scale_max.get()) / 100.0
+
+                except:
+                    scale = 1.0
+
+            if g.var_rot_mode.get() == "Fixed":
+
+                try:
+                    rot = g.var_rot_fixed.get()
+
+                except:
+                    rot = 0
+
+            elif g.var_rot_mode.get() == "Random":
+
+                try:
+                    rot = random.randint(g.var_rot_min.get(), g.var_rot_max.get())
+
+                except:
+                    rot = 0
+
+            else:
+
+                rot = g.custom_data.get(fname, {}).get("rot", 0)
+
+            fmode = g.var_flip_mode.get()
+
+            if fmode == "All":
+                flip = True
+
+            elif fmode == "Random":
+                flip = random.choice([True, False])
+
+            elif fmode == "Custom":
+                flip = g.custom_data.get(fname, {}).get("flip", False)
+
+            else:
+                flip = False
+
+            page_configs.append({"path": img_path, "scale": scale, "rot": rot, "flip": flip})
+
+        page_image_assignments[g_idx] = page_configs
+
+    schedule_preview()
+
+
+def draw_preview_canvas(*args):
+    preview_canvas.delete("all")
+
+    preview_img_refs.clear()
+
+    if not cached_qs:
+        return
+
+    SCALE = var_scale.get()
+
+    try:
+
+        q_per_page = int(entry_q_per_page.get())
+
+        total_pages_req = int(entry_total_pages.get())
+
+        spacing_val = var_spacing.get()
+
+        top_margin_val = var_top_margin.get()
+
+        side_margin_val = var_side_margin.get()
+
+        col_gap_val = var_col_gap.get()
+
+        custom_cols = int(entry_custom_cols.get())
+
+    except:
+
+        return
+
+    if custom_cols < 1: custom_cols = 1
+
+    paper_w, paper_h = get_paper_dimensions_pt()
+
+    header_margin = 40
+
+    start_y = paper_h - top_margin_val
+
+    line_height = spacing_val
+
+    is_answer = var_show_ans_preview.get()
+
+    mode = var_mode.get()
+
+    is_vertical = var_ver.get()
+
+    show_header = var_show_header.get()
+
+    show_box = var_show_box.get()
+
+    div_format = var_div_format.get()
+
+    v_gap = var_vertical_gap.get()
+
+    base_size = var_base_font_size.get()
+
+    f_color = var_font_color.get()
+
+    eff_color = var_effect_color.get()
+
+    eff_mode = var_effect_mode.get()
+
+    eff_thick = var_effect_thickness.get()
+
+    f_weight = "bold" if var_font_bold.get() else "normal"
+
+    f_slant = "italic" if var_font_italic.get() else "roman"
+
+    selected_name = var_selected_font_name.get()
+
+    tk_family = "Helvetica" if selected_name.startswith("Default") else selected_name
+
+    s_main = int(base_size * SCALE)
+
+    s_big = int(base_size * 1.15 * SCALE)
+
+    s_small = int(base_size * 0.7 * SCALE)
+
+    s_header_sub = int(s_small * 1.2)
+
+    font_main = (tk_family, s_main, f_weight, f_slant)
+
+    font_big = (tk_family, s_big, f_weight, f_slant)
+
+    font_small = (tk_family, s_small, f_weight, f_slant)
+
+    font_header_sub = (tk_family, s_header_sub, f_weight, f_slant)
+
+    num_cols = custom_cols
+
+    usable_width = paper_w - (2 * side_margin_val)
+
+    total_gap_width = (num_cols - 1) * col_gap_val
+
+    col_width = (usable_width - total_gap_width) / num_cols
+
+    total_pages = total_pages_req
+
+    page_gap = 20
+
+    paper_display_w = paper_w * SCALE
+
+    paper_display_h = paper_h * SCALE
+
+    total_h_pixels = total_pages * (paper_display_h + page_gap) + page_gap
+
+    canvas_w = max(preview_canvas.winfo_width(), paper_display_w + 40)
+
+    total_w_pixels = max(canvas_w, paper_display_w + page_gap * 2)
+
+    preview_canvas.configure(scrollregion=(0, 0, total_w_pixels, total_h_pixels))
+
+    center_offset_x = max(0, (canvas_w - paper_display_w) / 2) if canvas_w > paper_display_w else page_gap
+
+    def to_screen_x(pdf_x):
+
+        return (pdf_x * SCALE) + center_offset_x
+
+    def to_screen_y(pdf_y, page_index):
+
+        return (page_index * (paper_display_h + page_gap)) + ((paper_h - pdf_y) * SCALE)
+
+    def preview_text_with_effect(x, y, text, font, color, anchor='sw'):
+
+        if eff_mode == "Shadow":
+
+            off = (s_main * 0.05) * eff_thick
+
+            preview_canvas.create_text(x + off, y + off, text=text, font=font, anchor=anchor, fill=eff_color)
+
+        elif eff_mode == "Outline":
+
+            off = max(1, (s_main * 0.03) * eff_thick)
+
+            for dx, dy in [(-off, 0), (off, 0), (0, -off), (0, off), (-off, -off), (off, -off), (-off, off),
+                           (off, off)]:
+                preview_canvas.create_text(x + dx, y + dy, text=text, font=font, anchor=anchor, fill=eff_color)
+
+        elif eff_mode == "Glitch":
+
+            off = (s_main * 0.04) * eff_thick
+
+            preview_canvas.create_text(x - off, y, text=text, font=font, anchor=anchor, fill="cyan")
+
+            preview_canvas.create_text(x + off, y, text=text, font=font, anchor=anchor, fill="magenta")
+
+        return preview_canvas.create_text(x, y, text=text, font=font, anchor=anchor, fill=color)
+
+    for page_idx in range(total_pages):
+
+        paper_y = page_idx * (paper_display_h + page_gap) + page_gap / 2
+
+        bg_drawn = False
+
+        if bg_image_path and has_pillow and os.path.exists(bg_image_path):
+
+            try:
+
+                pil_img = Image.open(bg_image_path)
+
+                resized_img = pil_img.resize((int(paper_display_w), int(paper_display_h)), Image.LANCZOS)
+
+                tk_img = ImageTk.PhotoImage(resized_img)
+
+                preview_img_refs.append(tk_img)
+
+                preview_canvas.create_image(center_offset_x, paper_y, image=tk_img, anchor="nw")
+
+                bg_drawn = True
+
+            except:
+
+                pass
+
+        if not bg_drawn:
+
+            preview_canvas.create_rectangle(center_offset_x, paper_y, center_offset_x + paper_display_w,
+                                            paper_y + paper_display_h, fill="white", outline="black")
+
+        else:
+
+            preview_canvas.create_rectangle(center_offset_x, paper_y, center_offset_x + paper_display_w,
+                                            paper_y + paper_display_h, outline="black")
+
+        h_y = to_screen_y(paper_h - 40, page_idx)
+
+        preview_text_with_effect(to_screen_x(header_margin), h_y, entry_title.get(), font_main, f_color)
+
+        if show_header:
+            h_y_info = to_screen_y(paper_h - 65, page_idx)
+
+            preview_text_with_effect(to_screen_x(header_margin), h_y_info, var_header_text.get(), font_header_sub,
+                                     f_color)
+
+        # ==== วาดภาพตกแต่งใน Preview ====
+
+        if has_pillow:
+
+            for g_idx, g in enumerate(image_groups):
+
+                if not g.paths: continue
+
+                if not is_page_visible(g, page_idx): continue
+
+                preview_mode = g.var_preview_mode.get()
+
+                try:
+                    pos_x_pdf = g.var_pos_x.get()
+
+                except:
+                    pos_x_pdf = 100
+
+                try:
+                    pos_y_pdf = g.var_pos_y.get()
+
+                except:
+                    pos_y_pdf = 100
+
+                pos_x_scr = to_screen_x(pos_x_pdf)
+
+                pos_y_scr = to_screen_y(pos_y_pdf, page_idx)
+
+                if preview_mode != "Actual":
+
+                    target_fname = preview_mode
+
+                    target_path = next((p for p in g.paths if os.path.basename(p) == target_fname), g.paths[0])
+
+                    try:
+                        rot = g.custom_data.get(target_fname, {}).get("rot",
+                                                                      0) if g.var_rot_mode.get() == "Custom" else g.var_rot_fixed.get()
+
+                    except:
+                        rot = 0
+
+                    flip = g.custom_data.get(target_fname, {}).get("flip",
+                                                                   False) if g.var_flip_mode.get() == "Custom" else (
+                        True if g.var_flip_mode.get() == "All" else False)
+
+                    try:
+                        scale = g.var_scale_fixed.get() / 100.0
+
+                    except:
+                        scale = 1.0
+
+                else:
+
+                    configs = page_image_assignments.get(g_idx, [])
+
+                    if page_idx >= len(configs): continue
+
+                    cfg = configs[page_idx]
+
+                    target_path = cfg["path"];
+                    rot = cfg["rot"];
+                    flip = cfg["flip"];
+                    scale = cfg["scale"]
+
+                if os.path.exists(target_path):
+
+                    try:
+
+                        pil_img = Image.open(target_path).convert("RGBA")
+
+                        if flip: pil_img = pil_img.transpose(Image.FLIP_LEFT_RIGHT)
+
+                        # ใช้ FAST resizing สำหรับ Preview ให้ลื่นไหล
+
+                        orig_w, orig_h = pil_img.size
+
+                        new_w = max(1, int(orig_w * scale * SCALE))
+
+                        new_h = max(1, int(orig_h * scale * SCALE))
+
+                        pil_img = pil_img.resize((new_w, new_h), Image.NEAREST)
+
+                        if rot != 0: pil_img = pil_img.rotate(rot, expand=True)
+
+                        tk_img = ImageTk.PhotoImage(pil_img)
+
+                        preview_img_refs.append(tk_img)
+
+                        preview_canvas.create_image(pos_x_scr, pos_y_scr, image=tk_img, anchor="center")
+
+                    except:
+                        pass
+
+        # ==== วาดหมายเลขหน้าใน Preview (ใหม่!) ====
+
+        if var_pgnum_enable.get():
+
+            try:
+
+                p_text = var_pgnum_format.get().replace("{p}", str(page_idx + 1)).replace("{t}", str(total_pages_req))
+
+                tk_pg_family = "Helvetica" if var_pgnum_font.get().startswith("Default") else var_pgnum_font.get()
+
+                p_sz = int(var_pgnum_size.get() * SCALE)
+
+                p_weight = "bold" if var_pgnum_bold.get() else "normal"
+
+                p_slant = "italic" if var_pgnum_italic.get() else "roman"
+
+                p_font_tuple = (tk_pg_family, p_sz, p_weight, p_slant)
+
+                pos_choice = var_pgnum_pos.get()
+
+                margin = 30
+
+                if "Custom" in pos_choice:
+                    px, py, anchor = var_pgnum_x.get(), var_pgnum_y.get(), "center"
+
+                elif "ซ้ายบน" in pos_choice:
+                    px, py, anchor = margin, paper_h - margin, "nw"
+
+                elif "กลางบน" in pos_choice:
+                    px, py, anchor = paper_w / 2, paper_h - margin, "n"
+
+                elif "ขวาบน" in pos_choice:
+                    px, py, anchor = paper_w - margin, paper_h - margin, "ne"
+
+                elif "ซ้ายกลาง" in pos_choice:
+                    px, py, anchor = margin, paper_h / 2, "w"
+
+                elif "กลางจอ" in pos_choice:
+                    px, py, anchor = paper_w / 2, paper_h / 2, "center"
+
+                elif "ขวากลาง" in pos_choice:
+                    px, py, anchor = paper_w - margin, paper_h / 2, "e"
+
+                elif "ซ้ายล่าง" in pos_choice:
+                    px, py, anchor = margin, margin, "sw"
+
+                elif "ล่างกลาง" in pos_choice:
+                    px, py, anchor = paper_w / 2, margin, "s"
+
+                elif "ขวาล่าง" in pos_choice:
+                    px, py, anchor = paper_w - margin, margin, "se"
+
+                else:
+                    px, py, anchor = paper_w / 2, margin, "s"
+
+                preview_canvas.create_text(to_screen_x(px), to_screen_y(py, page_idx), text=p_text, font=p_font_tuple,
+                                           fill=var_pgnum_color.get(), anchor=anchor)
+
+            except:
+                pass
+
+        # ==== วาดลายน้ำใน Preview ====
+
+        if var_wm_enable.get() and var_wm_text.get():
+
+            try:
+
+                tk_wm_family = "Helvetica" if var_wm_font.get().startswith("Default") else var_wm_font.get()
+
+                wm_font_tuple = (tk_wm_family, int(var_wm_size.get() * SCALE), "normal", "roman")
+
+                preview_canvas.create_text(to_screen_x(var_wm_x.get()), to_screen_y(var_wm_y.get(), page_idx),
+                                           text=var_wm_text.get(), font=wm_font_tuple, fill=var_wm_color.get(),
+                                           anchor="sw")
+
+            except:
+                pass
+
+        start_item = page_idx * q_per_page
+
+        end_item = start_item + q_per_page
+
+        if start_item >= len(cached_qs):
+            continue
+
+        p_qs = cached_qs[start_item:end_item]
+
+        p_as = cached_ans[start_item:end_item]
+
+        base_item_idx = start_item
+
+        def draw_canvas_item(idx, q_str, ans_str, x_pos, y_pos):
+
+            q_num = idx + 1
+
+            screen_x = to_screen_x(x_pos)
+
+            screen_y = to_screen_y(y_pos, page_idx)
+
+            rect_top = to_screen_y(y_pos + 15, page_idx)
+
+            rect_bot = to_screen_y(y_pos - 5, page_idx)
+
+            q_start_x_scr = screen_x
+
+            if var_show_qnum.get():
+
+                num_txt = f"{q_num}."
+
+                cur_font = font_small if (
+                            is_vertical and mode == "normal" and len(str(q_str).split()) <= 4) else font_main
+
+                preview_text_with_effect(screen_x, screen_y, num_txt, cur_font, f_color, 'sw')
+
+                t_num = preview_canvas.create_text(-100, -100, text=num_txt + " ", font=cur_font)
+
+                bb_num = preview_canvas.bbox(t_num)
+
+                w_num_scr = (bb_num[2] - bb_num[0]) if bb_num else 20
+
+                preview_canvas.delete(t_num)
+
+                try:
+                    gap_val = var_qnum_gap.get()
+
+                except:
+                    gap_val = 5
+
+                q_start_x_scr += w_num_scr + (gap_val * SCALE)
+
+            else:
+
+                try:
+                    gap_val = var_qnum_gap.get()
+
+                except:
+                    gap_val = 5
+
+                q_start_x_scr += (gap_val * SCALE)
+
+            if is_vertical and mode == "normal" and len(str(q_str).split()) <= 4:
+
+                parts = str(q_str).replace("=", "").strip().split()
+
+                if len(parts) == 3:
+
+                    n1, op, n2 = parts
+
+                    t1 = preview_canvas.create_text(-100, -100, text=n1, font=font_big)
+
+                    t2 = preview_canvas.create_text(-100, -100, text=n2, font=font_big)
+
+                    bb1 = preview_canvas.bbox(t1)
+
+                    bb2 = preview_canvas.bbox(t2)
+
+                    w_n1_scr = (bb1[2] - bb1[0]) if bb1 else 20
+
+                    w_n2_scr = (bb2[2] - bb2[0]) if bb2 else 20
+
+                    preview_canvas.delete(t1);
+                    preview_canvas.delete(t2)
+
+                    max_w_scr = max(w_n1_scr, w_n2_scr)
+
+                    align_x_scr = q_start_x_scr + max_w_scr + (10 * SCALE)
+
+                    if op == '÷' and div_format in ['long', 'short']:
+
+                        t_b = preview_canvas.create_text(-100, -100, text=")", font=font_big)
+
+                        w_b_scr = (preview_canvas.bbox(t_b)[2] - preview_canvas.bbox(t_b)[0]) if preview_canvas.bbox(
+                            t_b) else 10
+
+                        preview_canvas.delete(t_b)
+
+                        dividend_x_scr = align_x_scr - w_n1_scr
+
+                        bracket_x_scr = dividend_x_scr - (5 * SCALE) - w_b_scr
+
+                        n2_x_scr = bracket_x_scr - (2 * SCALE) - w_n2_scr
+
+                        preview_text_with_effect(n2_x_scr, screen_y, n2, font_big, f_color, 'sw')
+
+                        preview_text_with_effect(bracket_x_scr, screen_y, ")", font_big, f_color, 'sw')
+
+                        preview_text_with_effect(dividend_x_scr, screen_y, n1, font_big, f_color, 'sw')
+
+                        line_start_x = bracket_x_scr
+
+                        line_end_x = align_x_scr + (5 * SCALE)
+
+                        if div_format == 'long':
+
+                            line_y = to_screen_y(y_pos + s_big * 0.95, page_idx)
+
+                            preview_canvas.create_line(line_start_x, line_y, line_end_x, line_y, fill=f_color, width=2)
+
+                            if is_answer: preview_canvas.create_text(dividend_x_scr + w_n1_scr / 2,
+                                                                     to_screen_y(y_pos + s_big * 0.95 + 5, page_idx),
+                                                                     text=str(ans_str), font=font_big, anchor="s",
+                                                                     fill="red")
+
+                        elif div_format == 'short':
+
+                            line_y = to_screen_y(y_pos - s_big * 0.2, page_idx)
+
+                            preview_canvas.create_line(line_start_x, line_y, line_end_x, line_y, fill=f_color, width=2)
+
+                            if is_answer:
+                                ans_y = to_screen_y(y_pos - s_big * 0.2 - 5, page_idx)
+
+                                preview_canvas.create_text(dividend_x_scr + w_n1_scr / 2, ans_y, text=str(ans_str),
+                                                           font=font_big, anchor="n", fill="red")
+
+                                preview_canvas.create_line(line_start_x + (10 * SCALE), ans_y + (15 * SCALE),
+                                                           line_end_x, ans_y + (15 * SCALE), fill=f_color, width=2)
+
+                                preview_canvas.create_line(line_start_x + (10 * SCALE), ans_y + (18 * SCALE),
+                                                           line_end_x, ans_y + (18 * SCALE), fill=f_color, width=2)
+
+                        return
+
+                    line_w_scr = max_w_scr + (15 * SCALE)
+
+                    preview_text_with_effect(align_x_scr, screen_y, n1, font_big, f_color, 'se')
+
+                    preview_text_with_effect(align_x_scr + (10 * SCALE), to_screen_y(y_pos - (v_gap / 2), page_idx), op,
+                                             font_big, f_color, 'sw')
+
+                    preview_text_with_effect(align_x_scr, to_screen_y(y_pos - v_gap, page_idx), n2, font_big, f_color,
+                                             'se')
+
+                    line_y = to_screen_y(y_pos - (v_gap + 5), page_idx)
+
+                    preview_canvas.create_line(align_x_scr - line_w_scr + (5 * SCALE), line_y,
+                                               align_x_scr + (5 * SCALE), line_y, fill=f_color, width=2)
+
+                    if is_answer: preview_canvas.create_text(align_x_scr, to_screen_y(y_pos - (v_gap + 25), page_idx),
+                                                             text=str(ans_str), font=font_big, anchor="se", fill="red")
+
+                    return
+
+            if mode == "hard_compare":
+
+                parts = str(q_str).split('|')
+
+                ans_parts = str(ans_str).split('|')
+
+                if len(parts) == 2:
+
+                    ans1 = ans_parts[0] if len(ans_parts) >= 3 else "";
+                    rel = ans_parts[1] if len(ans_parts) >= 3 else "";
+                    ans2 = ans_parts[2] if len(ans_parts) >= 3 else ""
+
+                    txt1 = f"{parts[0].strip()} =";
+                    txt2 = f"{parts[1].strip()} ="
+
+                    box_ans_w = 40 * SCALE;
+                    box_rel_w = 30 * SCALE;
+                    gap = 8 * SCALE
+
+                    t_item1 = preview_text_with_effect(q_start_x_scr, screen_y, txt1, font_main, f_color, 'sw')
+
+                    cur_x = q_start_x_scr + (
+                        (preview_canvas.bbox(t_item1)[2] - preview_canvas.bbox(t_item1)[0]) if preview_canvas.bbox(
+                            t_item1) else 50) + gap
+
+                    if show_box: preview_canvas.create_rectangle(cur_x, rect_top, cur_x + box_ans_w, rect_bot,
+                                                                 outline=f_color, width=2)
+
+                    if is_answer: preview_canvas.create_text(cur_x + box_ans_w / 2, screen_y, text=str(ans1),
+                                                             fill="red", font=font_main, anchor="s")
+
+                    cur_x += box_ans_w + gap
+
+                    if show_box: preview_canvas.create_rectangle(cur_x, rect_top, cur_x + box_rel_w, rect_bot,
+                                                                 outline=f_color, width=2)
+
+                    if is_answer: preview_canvas.create_text(cur_x + box_rel_w / 2, screen_y, text=str(rel), fill="red",
+                                                             font=font_main, anchor="s")
+
+                    cur_x += box_rel_w + gap
+
+                    t_item2 = preview_text_with_effect(cur_x, screen_y, txt2, font_main, f_color, 'sw')
+
+                    cur_x += ((preview_canvas.bbox(t_item2)[2] - preview_canvas.bbox(t_item2)[
+                        0]) if preview_canvas.bbox(t_item2) else 50) + gap
+
+                    if show_box: preview_canvas.create_rectangle(cur_x, rect_top, cur_x + box_ans_w, rect_bot,
+                                                                 outline=f_color, width=2)
+
+                    if is_answer: preview_canvas.create_text(cur_x + box_ans_w / 2, screen_y, text=str(ans2),
+                                                             fill="red", font=font_main, anchor="s")
+
+                return
+
+            if "□" in str(q_str):
+
+                parts = str(q_str).split("□")
+
+                t_item = preview_text_with_effect(q_start_x_scr, screen_y, parts[0].strip(), font_main, f_color, 'sw')
+
+                bw = 40 if mode == "compare" else 70
+
+                bx_x = q_start_x_scr + (
+                    (preview_canvas.bbox(t_item)[2] - preview_canvas.bbox(t_item)[0]) if preview_canvas.bbox(
+                        t_item) else 20) + (5 * SCALE)
+
+                if show_box: preview_canvas.create_rectangle(bx_x, rect_top, bx_x + (bw * SCALE), rect_bot,
+                                                             outline=f_color, width=2)
+
+                if len(parts) > 1 and parts[1].strip(): preview_text_with_effect(bx_x + (bw * SCALE) + (10 * SCALE),
+                                                                                 screen_y, parts[1].strip(), font_main,
+                                                                                 f_color, 'sw')
+
+                if is_answer: preview_canvas.create_text(bx_x + (bw * SCALE) / 2, screen_y, text=str(ans_str),
+                                                         fill="red", font=font_main, anchor="s")
+
+            else:
+
+                t_item = preview_text_with_effect(q_start_x_scr, screen_y, str(q_str), font_main, f_color, 'sw')
+
+                bx_x = q_start_x_scr + (
+                    (preview_canvas.bbox(t_item)[2] - preview_canvas.bbox(t_item)[0]) if preview_canvas.bbox(
+                        t_item) else 50) + (10 * SCALE)
+
+                if show_box: preview_canvas.create_rectangle(bx_x, rect_top, bx_x + (60 * SCALE), rect_bot,
+                                                             outline=f_color, width=2)
+
+                if is_answer: preview_canvas.create_text(bx_x + (30 * SCALE), screen_y, text=str(ans_str), fill="red",
+                                                         font=font_main, anchor="s")
+
+        if num_cols == 1 or var_order.get() == "z_pattern":
+
+            cur_y = start_y
+
+            cur_col = 0
+
+            for i, (q, a) in enumerate(zip(p_qs, p_as)):
+
+                x = side_margin_val + (cur_col * (col_width + col_gap_val))
+
+                draw_canvas_item(base_item_idx + i, q, a, x, cur_y)
+
+                cur_col += 1
+
+                if cur_col >= num_cols:
+                    cur_col = 0
+
+                    cur_y -= line_height
+
+        else:
+
+            split_idx = math.ceil(len(p_qs) / num_cols)
+
+            for c_idx in range(num_cols):
+
+                col_q = p_qs[c_idx * split_idx: (c_idx + 1) * split_idx]
+
+                col_a = p_as[c_idx * split_idx: (c_idx + 1) * split_idx]
+
+                cur_y = start_y
+
+                x = side_margin_val + (c_idx * (col_width + col_gap_val))
+
+                for r_idx, (q, a) in enumerate(zip(col_q, col_a)):
+
+                    real_idx = base_item_idx + (c_idx * split_idx) + r_idx
+
+                    if real_idx < len(cached_qs):
+                        draw_canvas_item(real_idx, q, a, x, cur_y)
+
+                        cur_y -= line_height
+
+
+# ==========================================
+
+# UI Setup (ระบบฝั่งซ้ายของหน้าต่าง)
+
+# ==========================================
+
+def apply_app_theme(bg_color, fg_color, frame_bg, btn_bg):
+    root.config(bg=bg_color)
+
+    left_frame_container.config(bg=bg_color)
+
+    left_canvas.config(bg=bg_color)
+
+    left_content.config(bg=bg_color)
+
+    preview_canvas.config(bg=frame_bg)
+
+    preview_header.config(bg=bg_color)
+
+    for widget in preview_header.winfo_children():
+
+        if widget.winfo_class() == 'Label':
+
+            widget.config(bg=bg_color, fg=fg_color)
+
+        elif widget.winfo_class() == 'Checkbutton':
+
+            widget.config(bg=bg_color, fg=fg_color, selectcolor=frame_bg)
+
+        elif widget.winfo_class() == 'Scale':
+
+            widget.config(bg=bg_color, fg=fg_color)
+
+    def update_widgets(parent):
+
+        for child in parent.winfo_children():
+
+            w_class = child.winfo_class()
+
+            if w_class in ('Frame', 'LabelFrame', 'Notebook'):
+
+                try:
+
+                    child.config(bg=frame_bg)
+
+                    if w_class == 'LabelFrame':
+                        child.config(fg=fg_color)
+
+                except:
+
+                    pass
+
+            elif w_class in ('Label', 'Checkbutton', 'Radiobutton'):
+
+                try:
+
+                    child.config(bg=frame_bg, fg=fg_color, selectcolor=frame_bg)
+
+                except:
+
+                    pass
+
+            elif w_class == 'Button':
+
+                txt = child.cget("text")
+
+                if "สี" not in txt and txt.strip() != "":
+
+                    try:
+
+                        child.config(bg=btn_bg, fg=fg_color)
+
+                    except:
+
+                        pass
+
+            update_widgets(child)
+
+    update_widgets(left_content)
+
+
+theme_frame = LabelFrame(left_content, text="🎨 ปรับแต่งธีมโปรแกรม (App Theme)", padx=10, pady=10)
+
+theme_frame.pack(fill="x", pady=(0, 15))
+
+Button(theme_frame, text="สว่าง (Default)",
+       command=lambda: apply_app_theme("#f0f0f0", "#000000", "#ffffff", "#e0e0e0")).pack(side=LEFT, padx=2, fill=X,
+                                                                                         expand=True)
+
+Button(theme_frame, text="มืด (Dark)",
+       command=lambda: apply_app_theme("#2d2d2d", "#ffffff", "#3d3d3d", "#555555")).pack(side=LEFT, padx=2, fill=X,
+                                                                                         expand=True)
+
+
+def custom_theme_picker():
+    color = colorchooser.askcolor(title="เลือกสีพื้นหลังโปรแกรมอิสระ")[1]
+
+    if color:
+        def hex_to_rgb_int(h):
+            return tuple(int(h.lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+
+        r, g, b = hex_to_rgb_int(color)
+
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b)
+
+        fg_color = "#000000" if luminance > 128 else "#ffffff"
+
+        def adj_bright(h, f):
+            r, g, b = hex_to_rgb_int(h)
+
+            return f"#{min(255, max(0, int(r * f))):02x}{min(255, max(0, int(g * f))):02x}{min(255, max(0, int(b * f))):02x}"
+
+        apply_app_theme(color, fg_color, adj_bright(color, 1.1 if fg_color == "#000000" else 0.9),
+                        adj_bright(color, 0.9 if fg_color == "#000000" else 1.2))
+
+
+Button(theme_frame, text="🌈 เลือกสีอิสระ...", command=custom_theme_picker).pack(side=LEFT, padx=2, fill=X, expand=True)
+
+# ==========================================
+
+# PRESET MANAGER
+
+# ==========================================
+
+preset_frame = LabelFrame(left_content, text="💾 จัดการการตั้งค่า (Save / Load / Reset)", padx=10, pady=10)
+
+preset_frame.pack(fill="x", pady=(0, 15))
+
+
+def get_current_state():
+    state = {
+
+        "realtime": var_realtime_preview.get(),
+
+        "title": entry_title.get(), "header_text": var_header_text.get(),
+
+        "q_per_page": entry_q_per_page.get(), "total_pages": entry_total_pages.get(),
+
+        "custom_cols": var_custom_cols.get(), "spacing": var_spacing.get(),
+
+        "top_margin": var_top_margin.get(), "side_margin": var_side_margin.get(),
+
+        "col_gap": var_col_gap.get(), "vertical_gap": var_vertical_gap.get(),
+
+        "qnum_gap": var_qnum_gap.get(), "show_qnum": var_show_qnum.get(),
+
+        "ops_count": var_ops_count.get(), "add": var_add.get(), "sub": var_sub.get(),
+
+        "mul": var_mul.get(), "div": var_div.get(), "mode": var_mode.get(),
+
+        "neg": var_neg.get(), "dec": var_dec.get(), "dec_places": var_dec_places.get(),
+
+        "par": var_par.get(), "ver": var_ver.get(), "unique": var_unique.get(),
+
+        "div_format": var_div_format.get(), "order": var_order.get(),
+
+        "show_box": var_show_box.get(), "show_header": var_show_header.get(),
+
+        "font_name": var_selected_font_name.get(), "font_color": var_font_color.get(),
+
+        "base_font_size": var_base_font_size.get(), "font_bold": var_font_bold.get(),
+
+        "font_italic": var_font_italic.get(), "effect_mode": var_effect_mode.get(),
+
+        "effect_color": var_effect_color.get(), "effect_thickness": var_effect_thickness.get(),
+
+        "ranges": [(e_min.get(), e_max.get()) for e_min, e_max in range_entries],
+
+        "bg_image": bg_image_path, "paper_size": var_paper_size.get(),
+
+        "orientation": var_orientation.get(), "custom_w": var_custom_w.get(),
+
+        "custom_h": var_custom_h.get(), "custom_unit": var_custom_unit.get(),
+
+        "wm_enable": var_wm_enable.get(), "wm_text": var_wm_text.get(),
+
+        "wm_x": var_wm_x.get(), "wm_y": var_wm_y.get(),
+
+        "wm_size": var_wm_size.get(), "wm_color": var_wm_color.get(),
+
+        "wm_font": var_wm_font.get(),
+
+        "pgnum_enable": var_pgnum_enable.get(), "pgnum_format": var_pgnum_format.get(),
+
+        "pgnum_pos": var_pgnum_pos.get(), "pgnum_x": var_pgnum_x.get(), "pgnum_y": var_pgnum_y.get(),
+
+        "pgnum_size": var_pgnum_size.get(), "pgnum_color": var_pgnum_color.get(),
+
+        "pgnum_font": var_pgnum_font.get(), "pgnum_bold": var_pgnum_bold.get(),
+
+        "pgnum_italic": var_pgnum_italic.get()
+
+    }
+
+    img_grps = []
+
+    for g in image_groups:
+        img_grps.append({
+
+            "paths": g.paths, "custom_data": g.custom_data, "preview_mode": g.var_preview_mode.get(),
+
+            "pos_x": g.var_pos_x.get(), "pos_y": g.var_pos_y.get(),
+
+            "scale_mode": g.var_scale_mode.get(), "scale_fixed": g.var_scale_fixed.get(),
+
+            "scale_min": g.var_scale_min.get(), "scale_max": g.var_scale_max.get(),
+
+            "rot_mode": g.var_rot_mode.get(), "rot_fixed": g.var_rot_fixed.get(),
+
+            "rot_min": g.var_rot_min.get(), "rot_max": g.var_rot_max.get(),
+
+            "display_mode": g.var_display_mode.get(), "unique": g.var_unique.get(),
+
+            "flip_mode": g.var_flip_mode.get(),
+
+            "vis_mode": g.var_vis_mode.get(), "vis_n": g.var_vis_n.get(), "vis_custom": g.var_vis_custom.get()
+
+        })
+
+    state["image_groups"] = img_grps
+
+    return state
+
+
+def apply_state(state):
+    try:
+
+        var_realtime_preview.set(state.get("realtime", True))
+
+        if "title" in state:
+            entry_title.delete(0, END);
+            entry_title.insert(0, state["title"])
+
+        if "header_text" in state:
+            var_header_text.set(state["header_text"])
+
+        if "q_per_page" in state:
+            entry_q_per_page.delete(0, END);
+            entry_q_per_page.insert(0, str(state["q_per_page"]))
+
+        if "total_pages" in state:
+            entry_total_pages.delete(0, END);
+            entry_total_pages.insert(0, str(state["total_pages"]))
+
+        var_custom_cols.set(state.get("custom_cols", 2))
+
+        var_spacing.set(state.get("spacing", 50))
+
+        var_top_margin.set(state.get("top_margin", 100))
+
+        var_side_margin.set(state.get("side_margin", 40))
+
+        var_col_gap.set(state.get("col_gap", 20))
+
+        var_vertical_gap.set(state.get("vertical_gap", 20))
+
+        var_qnum_gap.set(state.get("qnum_gap", 5))
+
+        var_show_qnum.set(state.get("show_qnum", True))
+
+        var_ops_count.set(state.get("ops_count", 2))
+
+        update_range_inputs()
+
+        ranges = state.get("ranges", [])
+
+        for i, (e_min, e_max) in enumerate(range_entries):
+
+            if i < len(ranges):
+                e_min.delete(0, END);
+                e_min.insert(0, str(ranges[i][0]))
+
+                e_max.delete(0, END);
+                e_max.insert(0, str(ranges[i][1]))
+
+        var_add.set(state.get("add", True));
+        var_sub.set(state.get("sub", True))
+
+        var_mul.set(state.get("mul", False));
+        var_div.set(state.get("div", False))
+
+        var_mode.set(state.get("mode", "normal"));
+        var_neg.set(state.get("neg", False))
+
+        var_dec.set(state.get("dec", False));
+        var_dec_places.set(state.get("dec_places", "สุ่ม"))
+
+        var_par.set(state.get("par", False));
+        var_ver.set(state.get("ver", False))
+
+        var_unique.set(state.get("unique", False));
+        var_div_format.set(state.get("div_format", "normal"))
+
+        var_order.set(state.get("order", "z_pattern"));
+        var_show_box.set(state.get("show_box", True));
+        var_show_header.set(state.get("show_header", True))
+
+        font_name = state.get("font_name", "Default (Helvetica)")
+
+        var_selected_font_name.set(font_name if font_name in system_font_names else system_font_names[0])
+
+        combo_fonts.set(var_selected_font_name.get())
+
+        var_font_color.set(state.get("font_color", "#000000"));
+        btn_font_color.config(bg=var_font_color.get())
+
+        var_base_font_size.set(state.get("base_font_size", 16));
+        var_font_bold.set(state.get("font_bold", False));
+        var_font_italic.set(state.get("font_italic", False))
+
+        var_effect_mode.set(state.get("effect_mode", "None"));
+        combo_eff.set(var_effect_mode.get())
+
+        var_effect_color.set(state.get("effect_color", "#000000"));
+        btn_eff_color.config(bg=var_effect_color.get())
+
+        var_effect_thickness.set(state.get("effect_thickness", 1.0))
+
+        var_paper_size.set(state.get("paper_size", "A4"));
+        var_orientation.set(state.get("orientation", "Portrait"))
+
+        var_custom_w.set(state.get("custom_w", "21.0"));
+        var_custom_h.set(state.get("custom_h", "29.7"));
+        var_custom_unit.set(state.get("custom_unit", "cm"))
+
+        toggle_custom_paper()
+
+        var_wm_enable.set(state.get("wm_enable", False));
+        var_wm_text.set(state.get("wm_text", "(แบบฝึกโดย พัฒน์)"))
+
+        var_wm_x.set(state.get("wm_x", 400));
+        var_wm_y.set(state.get("wm_y", 30))
+
+        var_wm_size.set(state.get("wm_size", 14));
+        var_wm_color.set(state.get("wm_color", "#808080"));
+        btn_wm_color.config(bg=var_wm_color.get())
+
+        var_wm_font.set(state.get("wm_font", "Default (Helvetica)"));
+        cb_wm_font.set(var_wm_font.get())
+
+        # Page Number settings
+
+        var_pgnum_enable.set(state.get("pgnum_enable", False))
+
+        var_pgnum_format.set(state.get("pgnum_format", "- {p} -"))
+
+        var_pgnum_pos.set(state.get("pgnum_pos", "ล่างกลาง (Bottom Center)"))
+
+        var_pgnum_x.set(state.get("pgnum_x", 300))
+
+        var_pgnum_y.set(state.get("pgnum_y", 30))
+
+        var_pgnum_size.set(state.get("pgnum_size", 12))
+
+        var_pgnum_color.set(state.get("pgnum_color", "#000000"))
+
+        btn_pgnum_color.config(bg=var_pgnum_color.get())
+
+        var_pgnum_font.set(state.get("pgnum_font", "Default (Helvetica)"))
+
+        cb_pgfont.set(var_pgnum_font.get())
+
+        var_pgnum_bold.set(state.get("pgnum_bold", False))
+
+        var_pgnum_italic.set(state.get("pgnum_italic", False))
+
+        global bg_image_path
+
+        bg_img = state.get("bg_image", None)
+
+        if bg_img and os.path.exists(bg_img):
+
+            bg_image_path = bg_img
+
+            lbl_bg_path.config(text=os.path.basename(bg_img), fg="black")
+
+        else:
+
+            bg_image_path = None
+
+            lbl_bg_path.config(text="ไม่มี (None)", fg="gray")
+
+        if "image_groups" in state:
+
+            for g_idx, g_state in enumerate(state["image_groups"]):
+
+                if g_idx < 3:
+
+                    g = image_groups[g_idx]
+
+                    g.paths = g_state.get("paths", [])
+
+                    g.custom_data = g_state.get("custom_data", {})
+
+                    if g.paths:
+
+                        g.lbl_info.config(text=f"เลือกแล้ว {len(g.paths)} รูป")
+
+                        g.cb_preview['values'] = ["Actual"] + [os.path.basename(p) for p in g.paths]
+
+                    else:
+
+                        g.lbl_info.config(text="ยังไม่ได้เลือกรูปภาพ")
+
+                        g.cb_preview['values'] = ["Actual"]
+
+                    g.var_preview_mode.set(g_state.get("preview_mode", "Actual"))
+
+                    g.var_pos_x.set(g_state.get("pos_x", 100));
+                    g.var_pos_y.set(g_state.get("pos_y", 100))
+
+                    g.var_scale_mode.set(g_state.get("scale_mode", "Fixed"));
+                    g.var_scale_fixed.set(g_state.get("scale_fixed", 100))
+
+                    g.var_scale_min.set(g_state.get("scale_min", 50));
+                    g.var_scale_max.set(g_state.get("scale_max", 150))
+
+                    g.var_rot_mode.set(g_state.get("rot_mode", "Fixed"));
+                    g.var_rot_fixed.set(g_state.get("rot_fixed", 0))
+
+                    g.var_rot_min.set(g_state.get("rot_min", -45));
+                    g.var_rot_max.set(g_state.get("rot_max", 45))
+
+                    g.var_display_mode.set(g_state.get("display_mode", "Sequence"));
+                    g.var_unique.set(g_state.get("unique", False));
+                    g.var_flip_mode.set(g_state.get("flip_mode", "None"))
+
+                    g.var_vis_mode.set(g_state.get("vis_mode", "All"));
+                    g.var_vis_n.set(g_state.get("vis_n", 2));
+                    g.var_vis_custom.set(g_state.get("vis_custom", "1,3,5"))
+
+                    g.toggle_custom_btn()
+
+        cb_dec.config(state="readonly" if var_dec.get() else "disabled")
+
+        schedule_data()
+
+    except Exception as e:
+
+        messagebox.showerror("Error", f"เกิดข้อผิดพลาดในการดึงข้อมูล: {e}")
+
+
+def action_save_preset():
+    filepath = filedialog.asksaveasfilename(initialdir=os.path.join(os.path.expanduser('~'), 'Desktop'),
+
+                                            initialfile=f"WorksheetSettings_{get_thai_datetime_string()}.json",
+
+                                            title="บันทึกไฟล์การตั้งค่า", defaultextension=".json",
+                                            filetypes=[("JSON Config", "*.json")])
+
+    if filepath:
+
+        try:
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+
+                json.dump(get_current_state(), f, ensure_ascii=False, indent=4)
+
+            messagebox.showinfo("Success", f"บันทึกการตั้งค่าเรียบร้อยแล้วที่:\n{filepath}")
+
+        except Exception as e:
+
+            messagebox.showerror("Error", f"ไม่สามารถบันทึกไฟล์ได้:\n{e}")
+
+
+def action_load_preset():
+    filepath = filedialog.askopenfilename(initialdir=os.path.join(os.path.expanduser('~'), 'Desktop'),
+                                          title="เปิดไฟล์การตั้งค่า", filetypes=[("JSON Config", "*.json")])
+
+    if filepath:
+
+        try:
+
+            with open(filepath, 'r', encoding='utf-8') as f:
+                apply_state(json.load(f))
+
+        except Exception as e:
+            messagebox.showerror("Error", f"ไม่สามารถโหลดไฟล์ได้:\n{e}")
+
+
+def reset_all_settings():
+    var_realtime_preview.set(True)
+
+    entry_q_per_page.delete(0, END);
+    entry_q_per_page.insert(0, "20")
+
+    entry_total_pages.delete(0, END);
+    entry_total_pages.insert(0, "1")
+
+    var_custom_cols.set(2);
+    var_spacing.set(50);
+    var_top_margin.set(100);
+    var_side_margin.set(40);
+    var_col_gap.set(20);
+    var_vertical_gap.set(20);
+    var_qnum_gap.set(5);
+    var_show_qnum.set(True)
+
+    combo_fonts.current(0);
+    var_selected_font_name.set(system_font_names[0]);
+    var_font_color.set("#000000");
+    btn_font_color.config(bg="#000000")
+
+    var_base_font_size.set(16);
+    var_font_bold.set(False);
+    var_font_italic.set(False)
+
+    var_effect_mode.set("None");
+    combo_eff.current(0);
+    var_effect_color.set("#000000");
+    btn_eff_color.config(bg="#000000");
+    var_effect_thickness.set(1.0)
+
+    var_ops_count.set(2);
+    var_add.set(True);
+    var_sub.set(True);
+    var_mul.set(False);
+    var_div.set(False)
+
+    var_mode.set("normal");
+    var_neg.set(False);
+    var_dec.set(False);
+    var_dec_places.set("สุ่ม");
+    cb_dec.config(state="disabled")
+
+    var_par.set(False);
+    var_ver.set(False);
+    var_div_format.set("normal");
+    var_unique.set(False);
+    var_order.set("z_pattern")
+
+    var_show_box.set(True);
+    var_show_header.set(True);
+    var_header_text.set("Name: ____________________  Class: ______  No: ____  Score: ______")
+
+    entry_title.delete(0, END);
+    entry_title.insert(0, "Math Worksheet")
+
+    var_paper_size.set("A4");
+    var_orientation.set("Portrait");
+    var_custom_w.set("21.0");
+    var_custom_h.set("29.7");
+    var_custom_unit.set("cm");
+    toggle_custom_paper()
+
+    var_wm_enable.set(False);
+    var_wm_text.set("(แบบฝึกโดย พัฒน์)");
+    var_wm_x.set(400);
+    var_wm_y.set(30);
+    var_wm_size.set(14);
+    var_wm_color.set("#808080");
+    btn_wm_color.config(bg="#808080");
+    var_wm_font.set(system_font_names[0] if system_font_names else "Helvetica");
+    cb_wm_font.current(0)
+
+    var_pgnum_enable.set(False);
+    var_pgnum_format.set("- {p} -");
+    var_pgnum_pos.set("ล่างกลาง (Bottom Center)");
+    var_pgnum_x.set(300);
+    var_pgnum_y.set(30);
+    var_pgnum_size.set(12);
+    var_pgnum_color.set("#000000");
+    btn_pgnum_color.config(bg="#000000");
+    var_pgnum_font.set(system_font_names[0] if system_font_names else "Helvetica");
+    cb_pgfont.current(0);
+    var_pgnum_bold.set(False);
+    var_pgnum_italic.set(False)
+
+    global bg_image_path;
+    bg_image_path = None;
+    lbl_bg_path.config(text="ไม่มี (None)", fg="gray")
+
+    for g in image_groups:
+        g.paths = [];
+        g.custom_data = {};
+        g.lbl_info.config(text="ยังไม่ได้เลือกรูปภาพ");
+        g.cb_preview['values'] = ["Actual"];
+        g.var_preview_mode.set("Actual")
+
+        g.var_pos_x.set(100);
+        g.var_pos_y.set(100);
+        g.var_scale_mode.set("Fixed");
+        g.var_scale_fixed.set(100);
+        g.var_scale_min.set(50);
+        g.var_scale_max.set(150)
+
+        g.var_rot_mode.set("Fixed");
+        g.var_rot_fixed.set(0);
+        g.var_rot_min.set(-45);
+        g.var_rot_max.set(45)
+
+        g.var_display_mode.set("Sequence");
+        g.var_unique.set(False);
+        g.var_flip_mode.set("None");
+        g.var_vis_mode.set("All");
+        g.var_vis_n.set(2);
+        g.var_vis_custom.set("1,3,5");
+        g.toggle_custom_btn()
+
+    update_range_inputs();
+    schedule_data()
+
+
+Button(preset_frame, text="💾 บันทึก...", bg="#e0f7fa", font=("Helvetica", 9), command=action_save_preset).pack(
+    side=LEFT, padx=3, fill=X, expand=True)
+
+Button(preset_frame, text="📂 โหลด...", bg="#fff9c4", font=("Helvetica", 9), command=action_load_preset).pack(side=LEFT,
+                                                                                                             padx=3,
+                                                                                                             fill=X,
+                                                                                                             expand=True)
+
+Button(preset_frame, text="🔄 คืนค่าโรงงาน", bg="#ffcdd2", font=("Helvetica", 9), command=reset_all_settings).pack(
+    side=LEFT, padx=3, fill=X, expand=True)
+
+# ==========================================
+
+# Main Layout Construction (สร้างโครง UI)
+
+# ==========================================
+
+Label(left_content, text="ตั้งค่าหน้ากระดาษและข้อความ", font=("Helvetica", 14, "bold")).pack(pady=(0, 5))
+
+Label(left_content, text="หัวข้อใบงาน (Worksheet Title):").pack(anchor="w")
+
+entry_title = Entry(left_content)
+
+entry_title.insert(0, "Math Worksheet")
+
+entry_title.pack(fill="x")
+
+entry_title.bind("<KeyRelease>", schedule_preview)
+
+Checkbutton(left_content, text="แสดงส่วนหัว (Header)", variable=var_show_header, command=schedule_preview).pack(
+    anchor="w", pady=(5, 0))
+
+Label(left_content, text="ข้อความส่วนหัว (Header Text):").pack(anchor="w")
+
+entry_header_text = Entry(left_content, textvariable=var_header_text)
+
+entry_header_text.pack(fill="x")
+
+entry_header_text.bind("<KeyRelease>", schedule_preview)
+
+page_frame = LabelFrame(left_content, text="ขนาดหน้ากระดาษ (Page Size)", padx=10, pady=10)
+
+page_frame.pack(fill="x", pady=10)
+
+
+def toggle_custom_paper(*args):
+    if var_paper_size.get() == "Custom":
+
+        e_custom_w.config(state="normal");
+        e_custom_h.config(state="normal");
+        cb_unit.config(state="readonly")
+
+    else:
+
+        e_custom_w.config(state="disabled");
+        e_custom_h.config(state="disabled");
+        cb_unit.config(state="disabled")
+
+    schedule_preview()
+
+
+row_p1 = Frame(page_frame)
+
+row_p1.pack(fill="x", pady=2)
+
+Label(row_p1, text="ขนาด:").pack(side=LEFT)
+
+cb_paper = ttk.Combobox(row_p1, textvariable=var_paper_size, values=["A4", "A3", "A5", "Letter", "Legal", "Custom"],
+                        state="readonly", width=10)
+
+cb_paper.pack(side=LEFT, padx=5);
+cb_paper.bind("<<ComboboxSelected>>", toggle_custom_paper)
+
+Radiobutton(row_p1, text="แนวตั้ง", variable=var_orientation, value="Portrait", command=schedule_preview).pack(
+    side=LEFT, padx=(5, 0))
+
+Radiobutton(row_p1, text="แนวนอน", variable=var_orientation, value="Landscape", command=schedule_preview).pack(
+    side=LEFT)
+
+row_p2 = Frame(page_frame)
+
+row_p2.pack(fill="x", pady=2)
+
+Label(row_p2, text="Custom กว้าง:").pack(side=LEFT)
+
+e_custom_w = Entry(row_p2, textvariable=var_custom_w, width=6, state="disabled")
+
+e_custom_w.pack(side=LEFT);
+e_custom_w.bind("<KeyRelease>", schedule_preview)
+
+Label(row_p2, text="สูง:").pack(side=LEFT, padx=(5, 0))
+
+e_custom_h = Entry(row_p2, textvariable=var_custom_h, width=6, state="disabled")
+
+e_custom_h.pack(side=LEFT);
+e_custom_h.bind("<KeyRelease>", schedule_preview)
+
+cb_unit = ttk.Combobox(row_p2, textvariable=var_custom_unit, values=["cm", "mm", "inch", "pt"], state="disabled",
+                       width=5)
+
+cb_unit.pack(side=LEFT, padx=5);
+cb_unit.bind("<<ComboboxSelected>>", lambda e: schedule_preview())
+
+cfg_frame = LabelFrame(left_content, text="การจัดหน้า & ระยะห่าง (Layout)", padx=10, pady=10)
+
+cfg_frame.pack(fill="x", pady=5)
+
+f_count_row = Frame(cfg_frame)
+
+f_count_row.pack(fill="x", pady=2)
+
+Label(f_count_row, text="ข้อ/หน้า:").pack(side=LEFT)
+
+entry_q_per_page = Entry(f_count_row, width=5, justify="center")
+
+entry_q_per_page.insert(0, "20");
+entry_q_per_page.pack(side=LEFT, padx=5);
+entry_q_per_page.bind("<KeyRelease>", schedule_data)
+
+Label(f_count_row, text="จำนวนหน้า:").pack(side=LEFT, padx=(10, 0))
+
+entry_total_pages = Entry(f_count_row, width=5, justify="center")
+
+entry_total_pages.insert(0, "1");
+entry_total_pages.pack(side=LEFT, padx=5);
+entry_total_pages.bind("<KeyRelease>", schedule_data)
+
+Label(f_count_row, text="คอลัมน์:").pack(side=LEFT, padx=(10, 0))
+
+entry_custom_cols = Entry(f_count_row, width=5, justify="center", textvariable=var_custom_cols)
+
+entry_custom_cols.pack(side=LEFT, padx=5);
+entry_custom_cols.bind("<KeyRelease>", schedule_preview)
+
+lbl_total_info = Label(cfg_frame, text="รวมทั้งหมด: 20 ข้อ", fg="blue", font=("Helvetica", 9))
+
+lbl_total_info.pack(anchor="w", pady=(2, 5))
+
+layout_ctrl_frame = Frame(cfg_frame)
+
+layout_ctrl_frame.pack(fill="x", pady=5)
+
+row1 = Frame(layout_ctrl_frame)
+
+row1.pack(fill="x")
+
+Scale(row1, from_=10, to=300, orient=HORIZONTAL, label="ห่างบรรทัด", variable=var_spacing,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(0, 5))
+
+Scale(row1, from_=0, to=500, orient=HORIZONTAL, label="ขอบบน (Top)", variable=var_top_margin,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(5, 0))
+
+row2 = Frame(layout_ctrl_frame)
+
+row2.pack(fill="x", pady=5)
+
+Scale(row2, from_=0, to=300, orient=HORIZONTAL, label="ขอบซ้าย-ขวา", variable=var_side_margin,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(0, 5))
+
+Scale(row2, from_=0, to=300, orient=HORIZONTAL, label="ห่างคอลัมน์", variable=var_col_gap,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(5, 0))
+
+row3 = Frame(layout_ctrl_frame)
+
+row3.pack(fill="x", pady=(0, 5))
+
+Scale(row3, from_=10, to=100, orient=HORIZONTAL, label="ห่างบรรทัดแนวตั้ง (บน-ล่าง)", variable=var_vertical_gap,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(0, 5))
+
+row4 = Frame(layout_ctrl_frame)
+
+row4.pack(fill="x", pady=(0, 5))
+
+Checkbutton(row4, text="แสดงหมายเลขข้อ", variable=var_show_qnum, command=schedule_preview).pack(side=LEFT, padx=(0, 10))
+
+Scale(row4, from_=0, to=100, orient=HORIZONTAL, label="ห่างจากเลขข้อ (Gap)", variable=var_qnum_gap,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(0, 5))
+
+font_frame = LabelFrame(left_content, text="ฟอนต์ & ดีไซน์ (Font & Design)", padx=10, pady=10)
+
+font_frame.pack(fill="x", pady=5)
+
+
+def select_font_color():
+    c = colorchooser.askcolor(title="เลือกสีตัวอักษร")[1]
+
+    if c:
+        var_font_color.set(c);
+        btn_font_color.config(bg=c);
+        schedule_preview()
+
+
+def select_effect_color():
+    c = colorchooser.askcolor(title="เลือกสีเอฟเฟกต์")[1]
+
+    if c:
+        var_effect_color.set(c);
+        btn_eff_color.config(bg=c);
+        schedule_preview()
+
+
+row_f1 = Frame(font_frame)
+
+row_f1.pack(fill="x", pady=2)
+
+Label(row_f1, text="Font:").pack(side=LEFT)
+
+combo_fonts = ttk.Combobox(row_f1, textvariable=var_selected_font_name, values=system_font_names, state="readonly",
+                           width=18)
+
+combo_fonts.pack(side=LEFT, padx=5);
+combo_fonts.bind("<<ComboboxSelected>>", lambda e: schedule_preview())
+
+Button(row_f1, text="สีหลัก", command=select_font_color, width=6).pack(side=LEFT, padx=(5, 0))
+
+btn_font_color = Label(row_f1, text="   ", bg=var_font_color.get(), relief=RIDGE)
+
+btn_font_color.pack(side=LEFT, padx=2)
+
+row_f2 = Frame(font_frame)
+
+row_f2.pack(fill="x", pady=5)
+
+Label(row_f2, text="Effect:").pack(side=LEFT)
+
+combo_eff = ttk.Combobox(row_f2, textvariable=var_effect_mode, values=["None", "Shadow", "Outline", "Glitch"],
+                         state="readonly", width=10)
+
+combo_eff.pack(side=LEFT, padx=5);
+combo_eff.bind("<<ComboboxSelected>>", lambda e: schedule_preview())
+
+Button(row_f2, text="สีเอฟเฟกต์", command=select_effect_color, width=9).pack(side=LEFT, padx=(5, 0))
+
+btn_eff_color = Label(row_f2, text="   ", bg=var_effect_color.get(), relief=RIDGE)
+
+btn_eff_color.pack(side=LEFT, padx=2)
+
+row_f3 = Frame(font_frame)
+
+row_f3.pack(fill="x", pady=5)
+
+Label(row_f3, text="Size:").pack(side=LEFT)
+
+Spinbox(row_f3, from_=8, to=120, textvariable=var_base_font_size, width=5, command=schedule_preview).pack(side=LEFT,
+                                                                                                          padx=5)
+
+Checkbutton(row_f3, text="ตัวหนา", variable=var_font_bold, command=schedule_preview).pack(side=LEFT, padx=5)
+
+Checkbutton(row_f3, text="ตัวเอียง", variable=var_font_italic, command=schedule_preview).pack(side=LEFT)
+
+row_f4 = Frame(font_frame)
+
+row_f4.pack(fill="x", pady=5)
+
+Scale(row_f4, from_=0.1, to=5.0, resolution=0.1, orient=HORIZONTAL, label="ความหนา Effect",
+      variable=var_effect_thickness, command=schedule_preview).pack(fill="x")
+
+# ==========================================
+
+# 📄 หมายเลขหน้า (Page Numbers) [NEW!]
+
+# ==========================================
+
+pgnum_frame = LabelFrame(left_content, text="📄 หมายเลขหน้า (Page Numbers)", padx=10, pady=10)
+
+pgnum_frame.pack(fill="x", pady=5)
+
+Checkbutton(pgnum_frame, text="แสดงหมายเลขหน้า", variable=var_pgnum_enable, command=schedule_preview).pack(anchor="w")
+
+row_pg1 = Frame(pgnum_frame)
+
+row_pg1.pack(fill="x", pady=2)
+
+Label(row_pg1, text="รูปแบบ:").pack(side=LEFT)
+
+e_pgfmt = Entry(row_pg1, textvariable=var_pgnum_format, width=15)
+
+e_pgfmt.pack(side=LEFT, padx=5)
+
+e_pgfmt.bind("<KeyRelease>", schedule_preview)
+
+Label(row_pg1, text="({p}=หน้าปัจจุบัน, {t}=รวม)", fg="gray", font=("Helvetica", 8)).pack(side=LEFT)
+
+row_pg2 = Frame(pgnum_frame)
+
+row_pg2.pack(fill="x", pady=2)
+
+Label(row_pg2, text="ตำแหน่ง:").pack(side=LEFT)
+
+cb_pgpos = ttk.Combobox(row_pg2, textvariable=var_pgnum_pos, values=[
+
+    "ซ้ายบน (Top Left)", "กลางบน (Top Center)", "ขวาบน (Top Right)",
+
+    "ซ้ายกลาง (Middle Left)", "กลางจอ (Center)", "ขวากลาง (Middle Right)",
+
+    "ซ้ายล่าง (Bottom Left)", "ล่างกลาง (Bottom Center)", "ขวาล่าง (Bottom Right)",
+
+    "กำหนดอิสระ (Custom)"
+
+], state="readonly", width=25)
+
+cb_pgpos.pack(side=LEFT, padx=5)
+
+cb_pgpos.bind("<<ComboboxSelected>>", lambda e: schedule_preview())
+
+row_pg3 = Frame(pgnum_frame)
+
+row_pg3.pack(fill="x", pady=2)
+
+Label(row_pg3, text="X:").pack(side=LEFT)
+
+sb_px = Spinbox(row_pg3, from_=0, to=2000, textvariable=var_pgnum_x, width=5, command=schedule_preview)
+
+sb_px.pack(side=LEFT, padx=2)
+
+sb_px.bind("<KeyRelease>", schedule_preview)
+
+Label(row_pg3, text="Y:").pack(side=LEFT)
+
+sb_py = Spinbox(row_pg3, from_=0, to=2000, textvariable=var_pgnum_y, width=5, command=schedule_preview)
+
+sb_py.pack(side=LEFT, padx=2)
+
+sb_py.bind("<KeyRelease>", schedule_preview)
+
+row_pg4 = Frame(pgnum_frame)
+
+row_pg4.pack(fill="x", pady=5)
+
+Label(row_pg4, text="Font:").pack(side=LEFT)
+
+cb_pgfont = ttk.Combobox(row_pg4, textvariable=var_pgnum_font, values=system_font_names, state="readonly", width=12)
+
+cb_pgfont.pack(side=LEFT, padx=5)
+
+cb_pgfont.bind("<<ComboboxSelected>>", lambda e: schedule_preview())
+
+Label(row_pg4, text="Size:").pack(side=LEFT)
+
+sb_psz = Spinbox(row_pg4, from_=8, to=100, textvariable=var_pgnum_size, width=3, command=schedule_preview)
+
+sb_psz.pack(side=LEFT, padx=5)
+
+sb_psz.bind("<KeyRelease>", schedule_preview)
+
+
+def select_pgnum_color():
+    c = colorchooser.askcolor(title="เลือกสีเลขหน้า")[1]
+
+    if c:
+        var_pgnum_color.set(c);
+        btn_pgnum_color.config(bg=c);
+        schedule_preview()
+
+
+Button(row_pg4, text="สี", command=select_pgnum_color, width=3).pack(side=LEFT)
+
+btn_pgnum_color = Label(row_pg4, text="   ", bg=var_pgnum_color.get(), relief=RIDGE)
+
+btn_pgnum_color.pack(side=LEFT, padx=2)
+
+Checkbutton(row_pg4, text="B", font=("Helvetica", 9, "bold"), variable=var_pgnum_bold, command=schedule_preview).pack(
+    side=LEFT, padx=2)
+
+Checkbutton(row_pg4, text="I", font=("Helvetica", 9, "italic"), variable=var_pgnum_italic,
+            command=schedule_preview).pack(side=LEFT)
+
+wm_frame = LabelFrame(left_content, text="🖋️ ลายน้ำ (Watermark)", padx=10, pady=10)
+
+wm_frame.pack(fill="x", pady=5)
+
+Checkbutton(wm_frame, text="เปิดใช้งานลายน้ำ", variable=var_wm_enable, command=schedule_preview).pack(anchor="w")
+
+row_wm1 = Frame(wm_frame)
+
+row_wm1.pack(fill="x", pady=2)
+
+Label(row_wm1, text="ข้อความ:").pack(side=LEFT)
+
+entry_wm_text = Entry(row_wm1, textvariable=var_wm_text)
+
+entry_wm_text.pack(side=LEFT, fill="x", expand=True, padx=5)
+
+entry_wm_text.bind("<KeyRelease>", schedule_preview)
+
+row_wm2 = Frame(wm_frame)
+
+row_wm2.pack(fill="x", pady=5)
+
+Label(row_wm2, text="Font:").pack(side=LEFT)
+
+cb_wm_font = ttk.Combobox(row_wm2, textvariable=var_wm_font, values=system_font_names, state="readonly", width=12)
+
+cb_wm_font.pack(side=LEFT, padx=5)
+
+cb_wm_font.bind("<<ComboboxSelected>>", lambda e: schedule_preview())
+
+Label(row_wm2, text="ขนาด:").pack(side=LEFT)
+
+Spinbox(row_wm2, from_=8, to=100, textvariable=var_wm_size, width=3, command=schedule_preview).pack(side=LEFT, padx=5)
+
+
+def select_wm_color():
+    c = colorchooser.askcolor(title="เลือกสีลายน้ำ")[1]
+
+    if c:
+        var_wm_color.set(c)
+
+        btn_wm_color.config(bg=c)
+
+        schedule_preview()
+
+
+Button(row_wm2, text="สี", command=select_wm_color, width=3).pack(side=LEFT)
+
+btn_wm_color = Label(row_wm2, text="   ", bg=var_wm_color.get(), relief=RIDGE)
+
+btn_wm_color.pack(side=LEFT, padx=2)
+
+row_wm3 = Frame(wm_frame)
+
+row_wm3.pack(fill="x", pady=5)
+
+Scale(row_wm3, from_=10, to=800, orient=HORIZONTAL, label="ซ้าย-ขวา (X)", variable=var_wm_x,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(0, 5))
+
+Scale(row_wm3, from_=10, to=1100, orient=HORIZONTAL, label="บน-ล่าง (Y)", variable=var_wm_y,
+      command=schedule_preview).pack(side=LEFT, fill="x", expand=True, padx=(5, 0))
+
+
+# ==========================================
+
+# Image Decorator UI
+
+# ==========================================
+
+def open_custom_settings(g_vars):
+    if not g_vars.paths:
+        messagebox.showwarning("คำเตือน", "กรุณาเลือกรูปภาพอย่างน้อย 1 รูปก่อนตั้งค่า!")
+
+        return
+
+    top = Toplevel(root)
+
+    top.title("ตั้งค่า พลิก/หมุน รายรูป (Custom Settings)")
+
+    top.geometry("400x500")
+
+    top.transient(root)
+
+    top.grab_set()
+
+    canvas_top = Canvas(top)
+
+    scrollbar = ttk.Scrollbar(top, orient="vertical", command=canvas_top.yview)
+
+    scrollable_frame = ttk.Frame(canvas_top)
+
+    scrollable_frame.bind("<Configure>", lambda e: canvas_top.configure(scrollregion=canvas_top.bbox("all")))
+
+    canvas_top.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+    canvas_top.configure(yscrollcommand=scrollbar.set)
+
+    canvas_top.pack(side="left", fill="both", expand=True)
+
+    scrollbar.pack(side="right", fill="y")
+
+    Label(scrollable_frame, text="ตั้งค่าบังคับเฉพาะรูป (Overrides)", font=("Helvetica", 10, "bold")).pack(pady=10)
+
+    def trigger_realtime_update(*args):
+
+        for fname, (v_f, v_r) in temp_vars.items():
+
+            try:
+
+                g_vars.custom_data[fname] = {"flip": v_f.get(), "rot": v_r.get()}
+
+            except:
+
+                pass
+
+        schedule_preview()
+
+    temp_vars = {}
+
+    for path in g_vars.paths:
+        fname = os.path.basename(path)
+
+        row = Frame(scrollable_frame, pady=5)
+
+        row.pack(fill="x", padx=10)
+
+        Label(row, text=fname[:15] + ("..." if len(fname) > 15 else ""), width=15, anchor="w").pack(side=LEFT)
+
+        v_flip = BooleanVar(value=g_vars.custom_data.get(fname, {}).get("flip", False))
+
+        Checkbutton(row, text="พลิก", variable=v_flip, command=trigger_realtime_update).pack(side=LEFT, padx=5)
+
+        Label(row, text="องศา:").pack(side=LEFT)
+
+        v_rot = IntVar(value=g_vars.custom_data.get(fname, {}).get("rot", 0))
+
+        sb = Spinbox(row, from_=-360, to=360, textvariable=v_rot, width=5, command=trigger_realtime_update)
+
+        sb.pack(side=LEFT)
+
+        sb.bind("<KeyRelease>", trigger_realtime_update)
+
+        temp_vars[fname] = (v_flip, v_rot)
+
+    Button(top, text="✔ บันทึกและปิดหน้าต่าง (Save & Close)", command=top.destroy, bg="#4CAF50", fg="white",
+           font=("Helvetica", 10, "bold")).pack(side="bottom", fill="x", pady=10, padx=10)
+
+
+def select_decorator_images(g_vars):
+    files = filedialog.askopenfilenames(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg")])
+
+    if files:
+        g_vars.paths = list(files)
+
+        g_vars.lbl_info.config(text=f"เลือกแล้ว {len(g_vars.paths)} รูป")
+
+        g_vars.cb_preview['values'] = ["Actual"] + [os.path.basename(p) for p in g_vars.paths]
+
+        g_vars.var_preview_mode.set("Actual")
+
+        schedule_data()
+
+
+def build_image_group_ui(parent, g_vars):
+    frame = Frame(parent, padx=5, pady=5)
+
+    row1 = Frame(frame)
+
+    row1.pack(fill="x", pady=2)
+
+    Button(row1, text="📁 เลือกรูปภาพ", command=lambda: select_decorator_images(g_vars)).pack(side=LEFT)
+
+    g_vars.lbl_info = Label(row1, text="ยังไม่ได้เลือกรูปภาพ", fg="blue")
+
+    g_vars.lbl_info.pack(side=LEFT, padx=10)
+
+    row2 = Frame(frame)
+
+    row2.pack(fill="x", pady=2)
+
+    Label(row2, text="👁️ จำลองดูรูปภาพ:").pack(side=LEFT)
+
+    g_vars.cb_preview = ttk.Combobox(row2, textvariable=g_vars.var_preview_mode, values=["Actual"], state="readonly",
+                                     width=25)
+
+    g_vars.cb_preview.pack(side=LEFT, padx=5)
+
+    g_vars.cb_preview.bind("<<ComboboxSelected>>", schedule_preview)
+
+    lf_vis = LabelFrame(frame, text="📄 หน้าที่แสดงผล (Page Visibility)")
+
+    lf_vis.pack(fill="x", pady=2)
+
+    Radiobutton(lf_vis, text="ทุกหน้า", variable=g_vars.var_vis_mode, value="All", command=schedule_preview).grid(row=0,
+                                                                                                                  column=0,
+                                                                                                                  sticky="w",
+                                                                                                                  padx=2)
+
+    Radiobutton(lf_vis, text="ทุกๆ", variable=g_vars.var_vis_mode, value="EveryN", command=schedule_preview).grid(row=0,
+                                                                                                                  column=1,
+                                                                                                                  sticky="w",
+                                                                                                                  padx=2)
+
+    e_vn = Entry(lf_vis, textvariable=g_vars.var_vis_n, width=3)
+
+    e_vn.grid(row=0, column=2, sticky="w")
+
+    e_vn.bind("<KeyRelease>", schedule_preview)
+
+    Label(lf_vis, text="หน้า").grid(row=0, column=3, sticky="w")
+
+    Radiobutton(lf_vis, text="กำหนดเอง:", variable=g_vars.var_vis_mode, value="Custom", command=schedule_preview).grid(
+        row=0, column=4, sticky="w", padx=(10, 0))
+
+    e_vc = Entry(lf_vis, textvariable=g_vars.var_vis_custom, width=12)
+
+    e_vc.grid(row=0, column=5, sticky="w")
+
+    e_vc.bind("<KeyRelease>", schedule_preview)
+
+    row3 = Frame(frame)
+
+    row3.pack(fill="x", pady=5)
+
+    fx = Frame(row3)
+
+    fx.pack(side=LEFT, fill="x", expand=True, padx=2)
+
+    Label(fx, text="พิกัด X:").pack(side=LEFT)
+
+    sb_x = Spinbox(fx, from_=-1000, to=3000, textvariable=g_vars.var_pos_x, width=5, command=schedule_preview)
+
+    sb_x.pack(side=RIGHT)
+
+    sb_x.bind("<KeyRelease>", schedule_preview)
+
+    Scale(fx, from_=0, to=1500, orient=HORIZONTAL, variable=g_vars.var_pos_x, command=schedule_preview,
+          showvalue=0).pack(side=LEFT, fill="x", expand=True, padx=2)
+
+    fy = Frame(row3)
+
+    fy.pack(side=LEFT, fill="x", expand=True, padx=2)
+
+    Label(fy, text="พิกัด Y:").pack(side=LEFT)
+
+    sb_y = Spinbox(fy, from_=-1000, to=3000, textvariable=g_vars.var_pos_y, width=5, command=schedule_preview)
+
+    sb_y.pack(side=RIGHT)
+
+    sb_y.bind("<KeyRelease>", schedule_preview)
+
+    Scale(fy, from_=0, to=1500, orient=HORIZONTAL, variable=g_vars.var_pos_y, command=schedule_preview,
+          showvalue=0).pack(side=LEFT, fill="x", expand=True, padx=2)
+
+    lf_scale = LabelFrame(frame, text="📏 ขนาดภาพ (Scale %)")
+
+    lf_scale.pack(fill="x", pady=2)
+
+    Radiobutton(lf_scale, text="คงที่", variable=g_vars.var_scale_mode, value="Fixed", command=schedule_preview).pack(
+        side=LEFT)
+
+    Scale(lf_scale, from_=1, to=500, orient=HORIZONTAL, variable=g_vars.var_scale_fixed, command=schedule_preview,
+          length=80, showvalue=0).pack(side=LEFT, padx=2)
+
+    sb_sc = Spinbox(lf_scale, from_=1, to=5000, textvariable=g_vars.var_scale_fixed, width=5, command=schedule_preview)
+
+    sb_sc.pack(side=LEFT, padx=(0, 10))
+
+    sb_sc.bind("<KeyRelease>", schedule_preview)
+
+    Radiobutton(lf_scale, text="สุ่ม", variable=g_vars.var_scale_mode, value="Random", command=schedule_data).pack(
+        side=LEFT)
+
+    Label(lf_scale, text="Min:").pack(side=LEFT)
+
+    e_smin = Entry(lf_scale, textvariable=g_vars.var_scale_min, width=4)
+
+    e_smin.pack(side=LEFT)
+
+    e_smin.bind("<KeyRelease>", schedule_data)
+
+    Label(lf_scale, text="Max:").pack(side=LEFT)
+
+    e_smax = Entry(lf_scale, textvariable=g_vars.var_scale_max, width=4)
+
+    e_smax.pack(side=LEFT)
+
+    e_smax.bind("<KeyRelease>", schedule_data)
+
+    lf_rot = LabelFrame(frame, text="🔄 การหมุน (Rotation องศา)")
+
+    lf_rot.pack(fill="x", pady=2)
+
+    cb_rot = ttk.Combobox(lf_rot, textvariable=g_vars.var_rot_mode, values=["Fixed", "Random", "Custom"],
+                          state="readonly", width=8)
+
+    cb_rot.pack(side=LEFT, padx=2)
+
+    cb_rot.bind("<<ComboboxSelected>>", lambda e: [g_vars.toggle_custom_btn(), schedule_data()])
+
+    Scale(lf_rot, from_=-360, to=360, orient=HORIZONTAL, variable=g_vars.var_rot_fixed, command=schedule_preview,
+          length=80, showvalue=0).pack(side=LEFT, padx=2)
+
+    sb_rt = Spinbox(lf_rot, from_=-3600, to=3600, textvariable=g_vars.var_rot_fixed, width=5, command=schedule_preview)
+
+    sb_rt.pack(side=LEFT, padx=(0, 10))
+
+    sb_rt.bind("<KeyRelease>", schedule_preview)
+
+    Label(lf_rot, text="Min:").pack(side=LEFT)
+
+    e_rmin = Entry(lf_rot, textvariable=g_vars.var_rot_min, width=4)
+
+    e_rmin.pack(side=LEFT)
+
+    e_rmin.bind("<KeyRelease>", schedule_data)
+
+    Label(lf_rot, text="Max:").pack(side=LEFT)
+
+    e_rmax = Entry(lf_rot, textvariable=g_vars.var_rot_max, width=4)
+
+    e_rmax.pack(side=LEFT)
+
+    e_rmax.bind("<KeyRelease>", schedule_data)
+
+    lf_disp = LabelFrame(frame, text="🔀 โหมดแสดงผล & พลิกซ้ายขวา")
+
+    lf_disp.pack(fill="x", pady=2)
+
+    Radiobutton(lf_disp, text="เรียง", variable=g_vars.var_display_mode, value="Sequence", command=schedule_data).grid(
+        row=0, column=0, sticky="w")
+
+    Radiobutton(lf_disp, text="สุ่มภาพ", variable=g_vars.var_display_mode, value="Random", command=schedule_data).grid(
+        row=0, column=1, sticky="w")
+
+    Checkbutton(lf_disp, text="ห้ามซ้ำ", variable=g_vars.var_unique, command=schedule_data, fg="red").grid(row=0,
+                                                                                                           column=2,
+                                                                                                           sticky="w")
+
+    Label(lf_disp, text="โหมดพลิก:").grid(row=1, column=0, sticky="e", pady=5)
+
+    cb_flip = ttk.Combobox(lf_disp, textvariable=g_vars.var_flip_mode, values=["None", "All", "Random", "Custom"],
+                           state="readonly", width=8)
+
+    cb_flip.grid(row=1, column=1, sticky="w", pady=5)
+
+    cb_flip.bind("<<ComboboxSelected>>", lambda e: [g_vars.toggle_custom_btn(), schedule_data()])
+
+    g_vars.btn_custom = Button(lf_disp, text="⚙️ ตั้งค่ารายรูป...", command=lambda: open_custom_settings(g_vars),
+                               state="disabled")
+
+    g_vars.btn_custom.grid(row=1, column=2, sticky="w", padx=5)
+
+    return frame
+
+
+dec_main_frame = LabelFrame(left_content, text="🖼️ ตกแต่งใบงาน (Image Decorator)", font=("Helvetica", 10, "bold"),
+                            padx=10, pady=10)
+
+dec_main_frame.pack(fill="x", pady=10)
+
+notebook = ttk.Notebook(dec_main_frame)
+
+notebook.pack(fill="x")
+
+for i in range(3):
+    f = build_image_group_ui(notebook, image_groups[i])
+
+    notebook.add(f, text=f"กลุ่มภาพที่ {i + 1}")
+
+# ==========================================
+
+# MATH SETTINGS (ตั้งค่าคณิตศาสตร์)
+
+# ==========================================
+
+op_frame = LabelFrame(left_content, text="ตั้งค่าโจทย์คณิตศาสตร์ (Math Settings)", padx=10, pady=10)
+
+op_frame.pack(fill="x", pady=10)
+
+
+def update_range_inputs():
+    for widget in range_frame.winfo_children():
+        widget.destroy()
+
+    range_entries.clear()
+
+    n = var_ops_count.get()
+
+    Label(range_frame, text="Min - Max:", font=("Helvetica", 10, "bold")).pack(anchor="w")
+
+    for i in range(n):
+        row = Frame(range_frame)
+
+        row.pack(fill="x", pady=2)
+
+        Label(row, text=f"Q{i + 1}:", width=4).pack(side=LEFT)
+
+        e_min = Entry(row, width=5, justify='center')
+
+        e_min.insert(0, "1" if i > 0 else "10")
+
+        e_min.pack(side=LEFT)
+
+        e_min.bind("<KeyRelease>", schedule_data)
+
+        Label(row, text="-").pack(side=LEFT, padx=2)
+
+        e_max = Entry(row, width=5, justify='center')
+
+        e_max.insert(0, "10" if i > 0 else "50")
+
+        e_max.pack(side=LEFT)
+
+        e_max.bind("<KeyRelease>", schedule_data)
+
+        range_entries.append((e_min, e_max))
+
+    schedule_data()
+
+
+f_sel = Frame(op_frame)
+
+f_sel.pack(anchor="w")
+
+Radiobutton(f_sel, text="2 ตัว", variable=var_ops_count, value=2, command=update_range_inputs).pack(side=LEFT)
+
+Radiobutton(f_sel, text="3 ตัว", variable=var_ops_count, value=3, command=update_range_inputs).pack(side=LEFT)
+
+Radiobutton(f_sel, text="4 ตัว", variable=var_ops_count, value=4, command=update_range_inputs).pack(side=LEFT)
+
+range_frame = Frame(op_frame)
+
+range_frame.pack(fill="x", pady=5)
+
+f_ops = Frame(op_frame)
+
+f_ops.pack(fill="x", pady=5)
+
+Checkbutton(f_ops, text="+", variable=var_add, command=schedule_data).pack(side=LEFT)
+
+Checkbutton(f_ops, text="-", variable=var_sub, command=schedule_data).pack(side=LEFT)
+
+Checkbutton(f_ops, text="x", variable=var_mul, command=schedule_data).pack(side=LEFT)
+
+Checkbutton(f_ops, text="/", variable=var_div, command=schedule_data).pack(side=LEFT)
+
+opt_frame = LabelFrame(left_content, text="โหมด & รูปแบบ (Mode & Format)", padx=10, pady=10)
+
+opt_frame.pack(fill="x")
+
+f_m = Frame(opt_frame)
+
+f_m.pack(anchor="w")
+
+Radiobutton(f_m, text="Normal", variable=var_mode, value="normal", command=schedule_data).pack(side=LEFT)
+
+Radiobutton(f_m, text="Fill", variable=var_mode, value="fill", command=schedule_data).pack(side=LEFT)
+
+Radiobutton(f_m, text="Compare", variable=var_mode, value="compare", command=schedule_data).pack(side=LEFT)
+
+Radiobutton(f_m, text="Equation", variable=var_mode, value="hard_compare", command=schedule_data).pack(side=LEFT)
+
+f_chk = Frame(opt_frame)
+
+f_chk.pack(fill="x", pady=5)
+
+Checkbutton(f_chk, text="ติดลบ", variable=var_neg, command=schedule_data).grid(row=0, column=0, sticky="w")
+
+f_dec = Frame(f_chk)
+
+f_dec.grid(row=0, column=1, sticky="w", padx=5)
+
+
+def toggle_dec_combo():
+    cb_dec.config(state="readonly" if var_dec.get() else "disabled")
+
+    schedule_data()
+
+
+Checkbutton(f_dec, text="ทศนิยม", variable=var_dec, command=toggle_dec_combo).pack(side=LEFT)
+
+cb_dec = ttk.Combobox(f_dec, textvariable=var_dec_places, values=["สุ่ม", "1 ตำแหน่ง", "2 ตำแหน่ง", "3 ตำแหน่ง"],
+                      width=8, state="disabled")
+
+cb_dec.pack(side=LEFT, padx=(5, 0))
+
+cb_dec.bind("<<ComboboxSelected>>", lambda e: schedule_data())
+
+Checkbutton(f_chk, text="วงเล็บ", variable=var_par, command=schedule_data).grid(row=1, column=0, sticky="w")
+
+Checkbutton(f_chk, text="ห้ามซ้ำ", variable=var_unique, fg="red", command=schedule_data).grid(row=2, column=0,
+                                                                                              sticky="w")
+
+f_ver = Frame(f_chk)
+
+f_ver.grid(row=1, column=1, rowspan=2, sticky="nw", padx=5)
+
+Checkbutton(f_ver, text="แนวตั้ง", variable=var_ver, fg="blue", command=schedule_preview).pack(anchor="w")
+
+f_div_fmt = Frame(f_ver)
+
+f_div_fmt.pack(anchor="w", padx=15)
+
+Radiobutton(f_div_fmt, text="ปกติ", variable=var_div_format, value="normal", command=schedule_preview, fg="blue").pack(
+    side=LEFT)
+
+Radiobutton(f_div_fmt, text="หารยาว", variable=var_div_format, value="long", command=schedule_preview, fg="blue").pack(
+    side=LEFT)
+
+Radiobutton(f_div_fmt, text="หารสั้น", variable=var_div_format, value="short", command=schedule_preview,
+            fg="blue").pack(side=LEFT)
+
+f_order = Frame(opt_frame)
+
+f_order.pack(anchor="w", pady=(10, 0))
+
+Label(f_order, text="การเรียงข้อ:").pack(side=LEFT)
+
+Radiobutton(f_order, text="ซ้ายไปขวา (Z)", variable=var_order, value="z_pattern", command=schedule_preview).pack(
+    side=LEFT)
+
+Radiobutton(f_order, text="บนลงล่าง (N)", variable=var_order, value="n_pattern", command=schedule_preview).pack(
+    side=LEFT)
+
+Checkbutton(opt_frame, text="แสดงกรอบคำตอบ (Show Box)", variable=var_show_box, command=schedule_preview).pack(
+    anchor="w", pady=(5, 0))
+
+# ==========================================
+
+# FILE EXPORT & BACKGROUND
+
+# ==========================================
+
+file_frame = LabelFrame(left_content, text="บันทึกไฟล์ & พื้นหลัง", padx=10, pady=10)
+
+file_frame.pack(fill="x", pady=20)
+
+bg_frame = Frame(file_frame)
+
+bg_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+
+Label(bg_frame, text="ภาพพื้นหลัง:").pack(side=LEFT)
+
+lbl_bg_path = Label(bg_frame, text="ไม่มี (None)", fg="gray", wraplength=200)
+
+lbl_bg_path.pack(side=LEFT, padx=5)
+
+
+def select_bg_image():
+    global bg_image_path
+
+    file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg")])
+
+    if file_path:
+        bg_image_path = file_path
+
+        lbl_bg_path.config(text=os.path.basename(file_path), fg="black")
+
+        schedule_preview()
+
+
+def clear_bg_image():
+    global bg_image_path
+
+    bg_image_path = None
+
+    lbl_bg_path.config(text="ไม่มี (None)", fg="gray")
+
+    schedule_preview()
+
+
+Button(bg_frame, text="เลือกภาพ...", command=select_bg_image).pack(side=LEFT)
+
+Button(bg_frame, text="ลบ", command=clear_bg_image).pack(side=LEFT, padx=2)
+
+
+def browse_file(entry_widget, default_name_prefix):
+    f = filedialog.asksaveasfilename(initialfile=default_name_prefix, defaultextension=".pdf",
+                                     filetypes=[("PDF", "*.pdf")])
+
+    if f:
+        entry_widget.delete(0, END)
+
+        entry_widget.insert(0, f)
+
+
+Label(file_frame, text="1. ใบงาน:").grid(row=1, column=0, sticky="w", pady=5)
+
+e_ws = Entry(file_frame)
+
+e_ws.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+
+Button(file_frame, text="เลือก...", command=lambda: browse_file(e_ws, "Worksheet")).grid(row=1, column=2, pady=5)
+
+Label(file_frame, text="2. เฉลย:").grid(row=2, column=0, sticky="w", pady=5)
+
+e_key = Entry(file_frame)
+
+e_key.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+
+Button(file_frame, text="เลือก...", command=lambda: browse_file(e_key, "WorksheetKey")).grid(row=2, column=2, pady=5)
+
+file_frame.columnconfigure(1, weight=1)
+
+f_img_export = Frame(file_frame)
+
+f_img_export.grid(row=3, column=0, columnspan=3, sticky="w", pady=5)
+
+Checkbutton(f_img_export, text="บันทึกเป็นรูปภาพด้วย (ต้องมี PyMuPDF)", variable=var_export_img).pack(side=LEFT)
+
+cb_img_fmt = ttk.Combobox(f_img_export, textvariable=var_img_format, values=["png", "jpeg"], state="readonly", width=5)
+
+cb_img_fmt.pack(side=LEFT, padx=5)
+
+
+def generate_action():
+    if not cached_qs:
+        messagebox.showerror("Error", "ไม่มีโจทย์ในระบบ กรุณาสร้างโจทย์ก่อน")
+
+        return
+
+    try:
+
+        ws_path = e_ws.get().strip()
+
+        key_path = e_key.get().strip()
+
+        desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
+
+        ts_thai = get_thai_datetime_string()
+
+        if not ws_path: ws_path = os.path.join(desktop, f"Worksheet{ts_thai}.pdf")
+
+        if not key_path: key_path = os.path.join(desktop, f"WorksheetKey{ts_thai}.pdf")
+
+        if not ws_path.lower().endswith(".pdf"): ws_path += ".pdf"
+
+        if not key_path.lower().endswith(".pdf"): key_path += ".pdf"
+
+        ws_path = get_unique_filename(ws_path)
+
+        key_path = get_unique_filename(key_path)
+
+        try:
+
+            q_per_page = int(entry_q_per_page.get())
+
+            total_pages = int(entry_total_pages.get())
+
+        except:
+            return
+
+        try:
+            custom_cols_val = int(entry_custom_cols.get())
+
+        except:
+            custom_cols_val = 2
+
+        selected_name = var_selected_font_name.get()
+
+        font_settings = {
+
+            'path': system_font_map.get(selected_name, None), 'family': selected_name, 'color': var_font_color.get(),
+
+            'size': var_base_font_size.get(), 'bold': var_font_bold.get(), 'italic': var_font_italic.get(),
+            'effect': var_effect_mode.get(),
+
+            'effect_color': var_effect_color.get(), 'effect_thickness': var_effect_thickness.get()
+
+        }
+
+        wm_settings = {
+
+            'enable': var_wm_enable.get(), 'text': var_wm_text.get(), 'font': var_wm_font.get(),
+            'size': var_wm_size.get(),
+
+            'color': var_wm_color.get(), 'x': var_wm_x.get(), 'y': var_wm_y.get()
+
+        }
+
+        # การคำนวณตำแหน่งเลขหน้าสำหรับส่งให้ PDF Generator
+
+        paper_dimensions = get_paper_dimensions_pt()
+
+        pw, ph = paper_dimensions
+
+        pos_choice = var_pgnum_pos.get()
+
+        margin = 30
+
+        if "Custom" in pos_choice:
+            px, py = var_pgnum_x.get(), var_pgnum_y.get()
+
+        elif "ซ้ายบน" in pos_choice:
+            px, py = margin, ph - margin
+
+        elif "กลางบน" in pos_choice:
+            px, py = pw / 2, ph - margin
+
+        elif "ขวาบน" in pos_choice:
+            px, py = pw - margin, ph - margin
+
+        elif "ซ้ายกลาง" in pos_choice:
+            px, py = margin, ph / 2
+
+        elif "กลางจอ" in pos_choice:
+            px, py = pw / 2, ph / 2
+
+        elif "ขวากลาง" in pos_choice:
+            px, py = pw - margin, ph / 2
+
+        elif "ซ้ายล่าง" in pos_choice:
+            px, py = margin, margin
+
+        elif "ล่างกลาง" in pos_choice:
+            px, py = pw / 2, margin
+
+        elif "ขวาล่าง" in pos_choice:
+            px, py = pw - margin, margin
+
+        else:
+            px, py = pw / 2, margin
+
+        if "ซ้าย" in pos_choice or "Left" in pos_choice:
+            align = "left"
+
+        elif "ขวา" in pos_choice or "Right" in pos_choice:
+            align = "right"
+
+        else:
+            align = "center"
+
+        pgnum_settings = {
+
+            'enable': var_pgnum_enable.get(), 'format': var_pgnum_format.get(), 'x': px, 'y': py,
+
+            'size': var_pgnum_size.get(), 'color': var_pgnum_color.get(), 'font': var_pgnum_font.get(),
+
+            'bold': var_pgnum_bold.get(), 'italic': var_pgnum_italic.get(), 'align': align
+
+        }
+
+        c1 = canvas.Canvas(ws_path, pagesize=paper_dimensions)
+
+        draw_worksheet_pdf(c1, cached_qs, cached_ans, entry_title.get(), False, var_mode.get(), var_ver.get(),
+                           var_ops_count.get(), var_order.get(), var_show_header.get(), var_header_text.get(),
+                           var_show_box.get(), q_per_page, total_pages, var_spacing.get(), var_top_margin.get(),
+                           var_side_margin.get(), var_col_gap.get(), bg_image_path, custom_cols_val, font_settings,
+                           var_div_format.get(), var_vertical_gap.get(), paper_dimensions, wm_settings,
+                           var_show_qnum.get(), var_qnum_gap.get(), image_groups, page_image_assignments,
+                           pgnum_settings)
+
+        c1.save()
+
+        c2 = canvas.Canvas(key_path, pagesize=paper_dimensions)
+
+        draw_worksheet_pdf(c2, cached_qs, cached_ans, entry_title.get(), True, var_mode.get(), var_ver.get(),
+                           var_ops_count.get(), var_order.get(), var_show_header.get(), var_header_text.get(),
+                           var_show_box.get(), q_per_page, total_pages, var_spacing.get(), var_top_margin.get(),
+                           var_side_margin.get(), var_col_gap.get(), bg_image_path, custom_cols_val, font_settings,
+                           var_div_format.get(), var_vertical_gap.get(), paper_dimensions, wm_settings,
+                           var_show_qnum.get(), var_qnum_gap.get(), image_groups, page_image_assignments,
+                           pgnum_settings)
+
+        c2.save()
+
+        img_msg = ""
+
+        if var_export_img.get():
+
+            if not has_pymupdf:
+
+                messagebox.showwarning("Missing Library", "ไม่สามารถบันทึกเป็นรูปภาพได้!\n\nกรุณาติดตั้ง PyMuPDF")
+
+            else:
+
+                try:
+
+                    fmt = var_img_format.get().lower()
+
+                    for f_path in [ws_path, key_path]:
+
+                        doc = fitz.open(f_path)
+
+                        for i in range(len(doc)):
+                            page = doc.load_page(i)
+
+                            pix = page.get_pixmap(dpi=300)
+
+                            base_name = f_path.replace(".pdf", f"_page_{i + 1}.{fmt}")
+
+                            pix.save(base_name)
+
+                        doc.close()
+
+                    img_msg = f"\n(และบันทึกเป็นรูปภาพ {fmt.upper()} เรียบร้อยแล้ว)"
+
+                except Exception as e:
+
+                    messagebox.showerror("Image Export Error", f"เกิดข้อผิดพลาดในการแปลงรูปภาพ:\n{e}")
+
+        e_ws.delete(0, END)
+
+        e_key.delete(0, END)
+
+        if messagebox.askyesno("Success",
+                               f"บันทึกสำเร็จ!{img_msg}\n\n1. {os.path.basename(ws_path)}\n2. {os.path.basename(key_path)}\n\nเปิดไฟล์ PDF เลยไหม?"):
+
+            try:
+
+                if platform.system() == "Windows":
+
+                    os.startfile(ws_path)
+
+                    os.startfile(key_path)
+
+                else:
+
+                    subprocess.Popen(["open", ws_path])
+
+                    subprocess.Popen(["open", key_path])
+
+            except:
+                pass
+
+    except Exception as e:
+
+        messagebox.showerror("Error", str(e))
+
+
+Button(file_frame, text="GENERATE PDF (สร้างไฟล์)", bg="#4CAF50", fg="white", font=("Helvetica", 14, "bold"),
+       command=generate_action).grid(row=4, column=0, columnspan=3, sticky="ew", pady=(15, 5))
+
+# ==========================================
+
+# SYSTEM STARTUP
+
+# ==========================================
+
+update_range_inputs()
+
+toggle_custom_paper()
+
+apply_app_theme("#f0f0f0", "#000000", "#ffffff", "#e0e0e0")
+
+root.mainloop()
